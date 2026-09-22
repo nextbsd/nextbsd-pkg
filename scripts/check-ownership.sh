@@ -12,7 +12,7 @@ set -eu
 
 # Component stage dirs created by build.sh. stage/everything is the empty meta —
 # it owns nothing, so it is intentionally omitted.
-comps="compat kernel kexts userland"
+comps="compat kernel kexts userland contrib"
 
 owners=$(mktemp)
 trap 'rm -f "$owners" "$owners.s"' EXIT
@@ -24,7 +24,7 @@ for c in $comps; do
     | sed "s#\$#	$c#" >> "$owners"
 done
 
-# Deliberate cross-package shared paths (normally empty — the four packages should
+# Deliberate cross-package shared paths (normally empty — the five packages should
 # partition the filesystem). Fixed-string matched against the reported path.
 allow="scripts/allowed-shared.txt"
 [ -f "$allow" ] || allow=/dev/null

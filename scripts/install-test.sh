@@ -55,7 +55,7 @@ echo "=== assert the install is COMPLETE (no package silently dropped) ==="
 # 2. The general form: every NextBSD-everything dependency must actually be
 #    registered. The failure mode was a green install that excluded a package;
 #    exit code alone would not catch it, `pkg info -e` per dep does.
-deps="NextBSD-freebsd-compat NextBSD-kernel NextBSD-userland"
+deps="NextBSD-freebsd-compat NextBSD-kernel NextBSD-userland NextBSD-contrib"
 if [ "$ARCH" = amd64 ] && ls "$REPO"/NextBSD-kernel-extensions-*.pkg >/dev/null 2>&1; then
   deps="$deps NextBSD-kernel-extensions"
 fi
@@ -63,5 +63,10 @@ for p in $deps; do
   $PKG info -e "$p" || { echo "FAIL: $p not installed by NextBSD-everything (SAT solver dropped it — file conflict?)" >&2; exit 1; }
 done
 
-echo "OK (${ARCH}): NextBSD-everything installs cleanly; launchd + all deps present"
+# 3. NextBSD-contrib's sudo must arrive setuid root: the bit is set at build time
+#    and survives tar + pkg create, but a chown in any step would clear it and
+#    ship a sudo that cannot escalate. Check it here, at the real extraction.
+[ -u "$ROOT/usr/bin/sudo" ] || { echo "FAIL: /usr/bin/sudo is not setuid after install ($(ls -l "$ROOT/usr/bin/sudo" 2>&1))" >&2; exit 1; }
+
+echo "OK (${ARCH}): NextBSD-everything installs cleanly; launchd + all deps present; sudo is setuid"
 rm -rf "$ROOT" "$REPOS"

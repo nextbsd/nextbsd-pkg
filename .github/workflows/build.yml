@@ -6,19 +6,20 @@ name: NextBSD packages
 # packaging happens inside a FreeBSD VM (vmactions); the Linux runner does the
 # cross-repo downloads (public repos -> GITHUB_TOKEN) and the release upload.
 #
-# Trigger model (maintainer decision): nextbsd-userland's publish is the SINGLE
-# auto producer (repository_dispatch: userland-updated). workflow_dispatch is the
-# manual escape hatch to repackage on a kernel/kext-only change. pull_request
-# builds the packages but never publishes.
+# Trigger model (maintainer decision): nextbsd-userland's publish is the auto
+# producer (repository_dispatch: userland-updated), joined by nextbsd-contrib's
+# (contrib-updated), since a contrib change never passes through userland.
+# workflow_dispatch is the manual escape hatch to repackage on a kernel/kext-only
+# change. pull_request builds the packages but never publishes.
 #
-# Both arches ship base + kernel + userland + kernel-extensions. The kext sets
+# Both arches ship base + kernel + userland + contrib + kernel-extensions. The kext sets
 # differ (arm64 has no Intel/AMD/Radeon/NVIDIA/Bochs/VBox parts, and ships the
 # drm core + the virtio-gpu trio instead), so the graphics asset is per-arch;
 # build.sh still skips the package entirely when an arch has no kexts at all.
 
 on:
   repository_dispatch:
-    types: [userland-updated]
+    types: [userland-updated, contrib-updated]
   workflow_dispatch:
   pull_request:
     paths: ['scripts/**', 'manifests/**', '.github/workflows/build.yml']
@@ -49,6 +50,10 @@ jobs:
             --pattern "nextbsd-kernel-${ARCH}.tar.gz" --dir art --clobber
           gh release download continuous -R nextbsd-redux/nextbsd-userland \
             --pattern "nextbsd-userland-${ARCH}.tar.gz" --dir art --clobber
+          # Third-party base programs (sudo, zsh, pico), built against the
+          # compat base only and published by nextbsd-contrib.
+          gh release download continuous -R nextbsd/nextbsd-contrib \
+            --pattern "nextbsd-contrib-${ARCH}.tar.gz" --dir art --clobber
           # Graphics kexts are per-arch: BOTH arches ship a stack (amd64 the
           # drm core + Intel/AMD/Radeon/Bochs/VBox, arm64 the drm core + the
           # virtio-gpu trio), under the same bundle names — hence the -${ARCH}

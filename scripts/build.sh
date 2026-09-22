@@ -3,7 +3,7 @@
 # `continuous` artifacts for ${ARCH} into one pkg(8) package each (named after
 # the source repo), plus a NextBSD-everything meta, into a FLAT repo (out/repo/).
 #
-# Arch-aware: both arches get all four packages. The kext SETS differ (arm64
+# Arch-aware: both arches get all five packages. The kext SETS differ (arm64
 # ships the drm core + virtio-gpu trio; amd64 adds Intel/AMD/Radeon/NVIDIA/
 # Bochs/VBox), so kernel-extensions is built from whatever kext tarballs the
 # workflow fetched for this arch — and skipped entirely if there are none. The
@@ -127,13 +127,22 @@ mkdir -p stage/userland
 tar -C stage/userland -xzf "art/nextbsd-userland-${ARCH}.tar.gz"
 mkpkg NextBSD-userland stage/userland "NextBSD Darwin/Mach userland (Mach, launchd, libdispatch, CoreFoundation, configd, IOKit + daemons)" "$(dep2 NextBSD-freebsd-compat NextBSD-kernel)"
 
-# --- 5. NextBSD-everything (meta: installs the whole OS for this arch) ---
+# --- 5. NextBSD-contrib (third-party base programs: sudo, zsh, pico) ---
+# Built by nextbsd-contrib against the compat base only, so it depends on
+# NextBSD-freebsd-compat alone. Repackaged verbatim: the tarball carries the
+# modes the build staged, including setuid on /usr/bin/sudo (tar as root keeps
+# it, and pkg create records it).
+mkdir -p stage/contrib
+tar -C stage/contrib -xzf "art/nextbsd-contrib-${ARCH}.tar.gz"
+mkpkg NextBSD-contrib stage/contrib "NextBSD third-party base programs (sudo, zsh, pico)" "$(dep NextBSD-freebsd-compat)"
+
+# --- 6. NextBSD-everything (meta: installs the whole OS for this arch) ---
 mkdir -p stage/everything
 {
   echo "name: NextBSD-everything"
   echo "origin: nextbsd/NextBSD-everything"
   echo "version: \"${VER}\""
-  echo "comment: \"NextBSD-everything meta-package (base + kernel + userland$([ "$HAVE_KEXTS" = 1 ] && echo ' + kernel-extensions'))\""
+  echo "comment: \"NextBSD-everything meta-package (base + kernel + userland + contrib$([ "$HAVE_KEXTS" = 1 ] && echo ' + kernel-extensions'))\""
   echo "desc: \"Installs the complete NextBSD ${ARCH} OS snapshot ${VER}.\""
   echo "maintainer: \"dev@nextbsd.org\""
   echo "www: \"https://nextbsd.org\""
@@ -144,6 +153,7 @@ mkdir -p stage/everything
   echo "  NextBSD-freebsd-compat: { origin: \"nextbsd/NextBSD-freebsd-compat\", version: \"${VER}\" }"
   echo "  NextBSD-kernel: { origin: \"nextbsd/NextBSD-kernel\", version: \"${VER}\" }"
   echo "  NextBSD-userland: { origin: \"nextbsd/NextBSD-userland\", version: \"${VER}\" }"
+  echo "  NextBSD-contrib: { origin: \"nextbsd/NextBSD-contrib\", version: \"${VER}\" }"
   [ "$HAVE_KEXTS" = 1 ] && echo "  NextBSD-kernel-extensions: { origin: \"nextbsd/NextBSD-kernel-extensions\", version: \"${VER}\" }"
   echo "}"
 } > /tmp/+MANIFEST
