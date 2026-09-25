@@ -6,11 +6,18 @@ name: NextBSD packages
 # packaging happens inside a FreeBSD VM (vmactions); the Linux runner does the
 # cross-repo downloads (public repos -> GITHUB_TOKEN) and the release upload.
 #
-# Trigger model (maintainer decision): nextbsd-userland's publish is the auto
-# producer (repository_dispatch: userland-updated), joined by nextbsd-contrib's
-# (contrib-updated), since a contrib change never passes through userland.
-# workflow_dispatch is the manual escape hatch to repackage on a kernel/kext-only
-# change. pull_request builds the packages but never publishes.
+# Trigger model (maintainer decision): PUBLISHING IS MANUAL. workflow_dispatch is
+# the only way to build and publish, and no other repository can start this one.
+#
+# It used to accept repository_dispatch from nextbsd-userland's publish
+# (userland-updated) and from nextbsd-contrib's (contrib-updated). Both are gone.
+# This workflow assembles the repository that consumers install from, so an
+# automatic rebuild republishes whatever just merged upstream before anyone has
+# looked at it -- it propagates a problem rather than containing it. A person
+# decides when the components are good enough to publish.
+#
+# pull_request builds the packages but never publishes, so the packaging itself
+# is still exercised on every change here.
 #
 # Both arches ship base + kernel + userland + contrib + kernel-extensions. The kext sets
 # differ (arm64 has no Intel/AMD/Radeon/NVIDIA/Bochs/VBox parts, and ships the
@@ -18,8 +25,6 @@ name: NextBSD packages
 # build.sh still skips the package entirely when an arch has no kexts at all.
 
 on:
-  repository_dispatch:
-    types: [userland-updated, contrib-updated]
   workflow_dispatch:
   pull_request:
     paths: ['scripts/**', 'manifests/**', '.github/workflows/build.yml']
