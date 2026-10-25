@@ -130,14 +130,14 @@ records library dependencies by name) still installs FreeBSD's copy into `/usr/l
 `libLLVM`, so nothing in base stands in for `llvm19`. Those `/usr/local` libraries
 aren't used by programs whose search path ends at rtld's default, but a FreeBSD program
 built with an `RPATH` of `/usr/local/lib` loads them, and then one process can hold two
-copies of libX11 or freetype. NextBSD doesn't block FreeBSD repos over this. It protects base instead (maintainer
-decision, 2026-10-25): NextBSD's pkg (nextbsd-contrib) lets a package that isn't
+copies of libX11 or freetype. NextBSD accepts this gap (maintainer decision, 2026-10-25). Images ship only the NextBSD
+repo, and a user who adds a FreeBSD repo is responsible for what they install from it.
+Base is protected another way: NextBSD's pkg (nextbsd-contrib) lets a package that isn't
 NextBSD's install only under `/usr/local` and `/var`, so a FreeBSD package can add a
-second copy there but can't overwrite or remove base. The `NextBSD-*` packages are also
-vital (below), so resolving a conflict with another repo's package can't remove them.
-Packages in the NextBSD repo under FreeBSD's names (for example an empty `libX11` that
-depends on `NextBSD-xlibs`, so the dependency resolves here first) would close the
-duplicate-library gap. They are deferred and not built here.
+second copy there but can't overwrite or remove base. The `NextBSD-*` packages are vital
+(below), so a conflict with another repo's package can't remove them, and pkg itself
+comes only from the NextBSD repo. NextBSD will never ship placeholder packages under
+FreeBSD's names (such as an empty `libX11`) to redirect those dependencies.
 
 ### Vital packages and the NextBSD stamp
 
