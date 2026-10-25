@@ -127,6 +127,11 @@ jobs:
             # shipping (nextbsd#370). Both run on PRs too (publish does not).
             ARCH=${{ matrix.arch }} sh scripts/build.sh
             ARCH=${{ matrix.arch }} sh scripts/install-test.sh
+            # copyback rsyncs the whole work dir back to the runner, and only
+            # out/repo is needed (publish). The staged trees and artifacts are
+            # ~2.5 GB with the display and E24 packages, and that transfer has
+            # been dropping mid-way; leave only out/repo to copy back.
+            rm -rf stage tool art
 
       - name: Publish flat repo to continuous-${{ matrix.arch }}
         if: github.event_name != 'pull_request'
