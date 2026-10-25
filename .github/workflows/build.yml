@@ -21,7 +21,7 @@ name: Build NextBSD packages
 #
 # Both arches ship base + kernel + userland + contrib + kernel-extensions, plus the
 # display server stack (displayserver-support, xlibs, mesa, xlibre) and the E24
-# packages (gnustep-, printing-, gershwin-support, toolchain). The kext sets
+# packages (gnustep-, printing-support, toolchain). The kext sets
 # differ (arm64 has no Intel/AMD/Radeon/NVIDIA/Bochs/VBox parts, and ships the
 # drm core + the virtio-gpu trio instead), so the graphics asset is per-arch;
 # build.sh still skips the package entirely when an arch has no kexts at all.
@@ -63,13 +63,14 @@ jobs:
           #   contrib: third-party base programs (sudo, zsh, pico).
           #   displayserver-support, xlibs, mesa, xlibre: the display server
           #     stack (E23 nextbsd#561, E25 nextbsd#583).
-          #   gnustep-support, printing-support, gershwin-support, toolchain:
-          #     E24 (nextbsd#574), what GNUstep and Gershwin need plus the
-          #     on-machine toolchain. Gershwin builds GNUstep itself (D10).
+          #   gnustep-support, printing-support, toolchain: E24 (nextbsd#574),
+          #     what GNUstep needs plus the on-machine toolchain. Gershwin
+          #     builds GNUstep itself (D10). nextbsd-gershwin-support is
+          #     deliberately not packaged (maintainer, 2026-10-25).
           # None of the display or E24 packages is in NextBSD-everything.
           for r in contrib \
                    displayserver-support xlibs mesa xlibre \
-                   gnustep-support printing-support gershwin-support toolchain; do
+                   gnustep-support printing-support toolchain; do
             gh release download continuous -R "nextbsd/nextbsd-$r" \
               --pattern "nextbsd-$r-${ARCH}.tar.gz" --dir art --clobber
           done

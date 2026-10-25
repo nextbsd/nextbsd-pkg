@@ -296,15 +296,18 @@ for p in NextBSD-displayserver-support NextBSD-xlibs NextBSD-mesa NextBSD-xlibre
   $NBPKG query -F out/repo/"$p"-*.pkg '%b' | sort | tr '\n' ' '; echo
 done
 
-# --- 10-13. E24 (nextbsd#574): GNUstep/Gershwin requirements + the toolchain ---
+# --- 10-12. E24 (nextbsd#574): GNUstep/Gershwin requirements + the toolchain ---
 # Gershwin builds and installs GNUstep itself into /System (D10); NextBSD ships
-# only what it needs, in /usr and /usr/X11. None of these four is in
+# only what it needs, in /usr and /usr/X11. None of these three is in
 # NextBSD-everything: Gershwin images list them in Gershwin's nextbsd.txt, and
 # NextBSD-toolchain in particular is installed by default on Gershwin images
 # only (D11). Repackaged verbatim: the artifacts carry no /etc (CUPS's config,
 # PAM stack and accounts come from nextbsd-overlays), no /usr/local and no
 # ldconfig drop-in, and nothing runs ldconfig after install (rtld's default
 # path covers /usr/X11/lib; see pkg#25).
+#
+# nextbsd-gershwin-support is deliberately NOT packaged (maintainer,
+# 2026-10-25), so nothing here may depend on it.
 
 # 10. NextBSD-gnustep-support: image formats, GnuTLS (+ nettle, gmp), cairo
 #     (in /usr/X11), libsndfile + libao, SQLite, flite, FFmpeg. cairo links
@@ -320,19 +323,12 @@ repkg NextBSD-gnustep-support gnustep "NextBSD GNUstep support libraries (image 
 repkg NextBSD-printing-support printing "NextBSD printing support (Apple's CUPS)" \
   NextBSD-freebsd-compat NextBSD-userland NextBSD-gnustep-support
 
-# 12. NextBSD-gershwin-support: what only Gershwin uses (wget, xdotool in
-#     /usr/X11, lcms2, squashfs-tools-ng + squashfuse with libfuse3/zstd/lz4).
-#     xdotool links libX11, libXtst and libXinerama from xlibs and
-#     libxkbcommon from displayserver-support.
-repkg NextBSD-gershwin-support gershwin "NextBSD Gershwin support (wget, xdotool, lcms2, squashfs tools)" \
-  NextBSD-freebsd-compat NextBSD-displayserver-support NextBSD-xlibs
-
-# 13. NextBSD-toolchain: on-machine clang/lld 19.1.7, LLVM binutils, gmake,
+# 12. NextBSD-toolchain: on-machine clang/lld 19.1.7, LLVM binutils, gmake,
 #     pkgconf and Apple's Git (client only; libcurl from the userland).
 repkg NextBSD-toolchain toolchain "NextBSD on-machine toolchain (clang/lld 19.1.7, gmake, pkgconf, Git)" \
   NextBSD-freebsd-compat NextBSD-userland
 
-# --- 14. pkg: NextBSD's own pkg(8) (pkg#19) ---
+# --- 13. pkg: NextBSD's own pkg(8) (pkg#19) ---
 # Built by nextbsd-contrib from its frozen pkg 2.8.4 with the NextBSD patches
 # (src/pkg, NEXTBSD.md): pkg comes only from the repository named NextBSD; a
 # package not from it, or a package file without org.nextbsd.origin=NextBSD,
@@ -348,7 +344,7 @@ PKGVER=$(sed -n 's/^Version: *//p' tool/pc/usr/libdata/pkgconfig/pkg.pc)
 repkg -a nextbsd-contrib-pkg -v "$PKGVER" pkg pkg "NextBSD's pkg(8) package manager (pkg only from the NextBSD repository)" \
   NextBSD-freebsd-compat
 
-# --- 15. NextBSD-everything (meta: installs the whole OS for this arch) ---
+# --- 14. NextBSD-everything (meta: installs the whole OS for this arch) ---
 # The display stack (nextbsd#571 is still open) and the E24 packages (D11;
 # Gershwin's nextbsd.txt) are deliberately not in it.
 mkdir -p stage/everything

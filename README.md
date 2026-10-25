@@ -18,7 +18,6 @@ nextbsd-mesa ──────────────┤
 nextbsd-xlibre ────────────┤
 nextbsd-gnustep-support ───┤
 nextbsd-printing-support ──┤
-nextbsd-gershwin-support ──┤
 nextbsd-toolchain ─────────┘
                │  repository_dispatch: userland-updated / contrib-updated
                ▼
@@ -82,7 +81,6 @@ pkg upgrade                    # rolling: picks up each new snapshot
 | `NextBSD-xlibre` | ✓ | ✓ | nextbsd-xlibre (XLibre 25.1.9 server, drivers, tools, libepoxy, libxcvt, libpciaccess in `/usr/X11`; the `org.nextbsd.xlibre` LaunchAgent; an empty `/var/db/xkb`). `vesa` and `vmmouse` are amd64 only | compat, displayserver-support, xlibs, mesa | — |
 | `NextBSD-gnustep-support` | ✓ | ✓ | nextbsd-gnustep-support (what GNUstep needs: image formats, GnuTLS, cairo in /usr/X11, sound, SQLite, flite, FFmpeg) | compat, displayserver-support, xlibs | — |
 | `NextBSD-printing-support` | ✓ | ✓ | nextbsd-printing-support (Apple's CUPS; GnuTLS from gnustep-support) | compat, userland, gnustep-support | — |
-| `NextBSD-gershwin-support` | ✓ | ✓ | nextbsd-gershwin-support (what only Gershwin uses: wget, xdotool in /usr/X11, lcms2, squashfs tools) | compat, displayserver-support, xlibs | — |
 | `NextBSD-toolchain` | ✓ | ✓ | nextbsd-toolchain (on-machine clang/lld 19.1.7, gmake, pkgconf, Apple's Git) | compat, userland | — |
 | `pkg` | ✓ | ✓ | nextbsd-contrib's pkg artifact (NextBSD's pkg(8) 2.8.4; version from its `pkg.pc`) | compat | ✓ |
 | `NextBSD-everything` (meta) | ✓ | ✓ | — | base, kernel, userland, contrib, kernel-extensions and pkg | |
@@ -103,7 +101,8 @@ entries matched to the files the other artifacts ship.
 - The [E24](https://github.com/nextbsd/nextbsd-userland/wiki/E24-GNUstep-Gershwin-Requirements-Direction)
   packages: Gershwin builds GNUstep itself (D10) and installs these requirements through
   its `nextbsd.txt`, and `NextBSD-toolchain` is installed by default on Gershwin images
-  only (D11).
+  only (D11). nextbsd-gershwin-support is deliberately **not** packaged (maintainer,
+  2026-10-25), and no package depends on it.
 
 **`/etc` belongs to nextbsd-overlays, not these packages** (decision on
 [#25](https://github.com/nextbsd/nextbsd-pkg/issues/25)): `/etc/fonts`, `/etc/xkb`,
