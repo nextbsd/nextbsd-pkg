@@ -19,7 +19,8 @@ name: Build NextBSD packages
 # pull_request builds the packages but never publishes, so the packaging itself
 # is still exercised on every change here.
 #
-# Both arches ship base + kernel + userland + contrib + kernel-extensions. The kext sets
+# Both arches ship base + kernel + userland + contrib + kernel-extensions, plus the
+# E24 packages (gnustep-, printing-, gershwin-support, toolchain). The kext sets
 # differ (arm64 has no Intel/AMD/Radeon/NVIDIA/Bochs/VBox parts, and ships the
 # drm core + the virtio-gpu trio instead), so the graphics asset is per-arch;
 # build.sh still skips the package entirely when an arch has no kexts at all.
@@ -59,6 +60,17 @@ jobs:
           # compat base only and published by nextbsd-contrib.
           gh release download continuous -R nextbsd/nextbsd-contrib \
             --pattern "nextbsd-contrib-${ARCH}.tar.gz" --dir art --clobber
+          # E24 (nextbsd#574): what GNUstep and Gershwin need, plus the
+          # on-machine toolchain. Gershwin builds GNUstep itself (D10); these
+          # are only its requirements. None of them is in NextBSD-everything.
+          gh release download continuous -R nextbsd/nextbsd-gnustep-support \
+            --pattern "nextbsd-gnustep-support-${ARCH}.tar.gz" --dir art --clobber
+          gh release download continuous -R nextbsd/nextbsd-printing-support \
+            --pattern "nextbsd-printing-support-${ARCH}.tar.gz" --dir art --clobber
+          gh release download continuous -R nextbsd/nextbsd-gershwin-support \
+            --pattern "nextbsd-gershwin-support-${ARCH}.tar.gz" --dir art --clobber
+          gh release download continuous -R nextbsd/nextbsd-toolchain \
+            --pattern "nextbsd-toolchain-${ARCH}.tar.gz" --dir art --clobber
           # Graphics kexts are per-arch: BOTH arches ship a stack (amd64 the
           # drm core + Intel/AMD/Radeon/Bochs/VBox, arm64 the drm core + the
           # virtio-gpu trio), under the same bundle names — hence the -${ARCH}

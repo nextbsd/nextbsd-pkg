@@ -1,7 +1,7 @@
 # allowed-shared.txt — deliberate cross-package shared paths for check-ownership.sh
 # (Layer A of the nextbsd#370 gate). One path per line; fixed-string matched.
 #
-# Normally EMPTY: the four NextBSD-* packages should partition the filesystem, so
+# Normally EMPTY: the NextBSD-* packages should partition the filesystem, so
 # any co-owned path is a bug (the userland<->compat man-page collision class).
 # Only add a path here if two packages are genuinely, intentionally meant to ship
 # it — and prefer fixing the ownership (strip it from one side) over allowlisting.

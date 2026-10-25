@@ -3,7 +3,7 @@
 # `continuous` artifacts for ${ARCH} into one pkg(8) package each (named after
 # the source repo), plus a NextBSD-everything meta, into a FLAT repo (out/repo/).
 #
-# Arch-aware: both arches get all five packages. The kext SETS differ (arm64
+# Arch-aware: both arches get every package. The kext SETS differ (arm64
 # ships the drm core + virtio-gpu trio; amd64 adds Intel/AMD/Radeon/NVIDIA/
 # Bochs/VBox), so kernel-extensions is built from whatever kext tarballs the
 # workflow fetched for this arch — and skipped entirely if there are none. The
@@ -47,6 +47,15 @@ UCL
 
 dep()  { printf 'deps: { %s: { origin: "nextbsd/%s", version: "%s" } }\n' "$1" "$1" "$VER"; }
 dep2() { printf 'deps: { %s: { origin: "nextbsd/%s", version: "%s" }, %s: { origin: "nextbsd/%s", version: "%s" } }\n' "$1" "$1" "$VER" "$2" "$2" "$VER"; }
+# deps <name>... : one deps block for any number of same-snapshot NextBSD-* packages.
+deps() {
+  _sep=
+  printf 'deps: {'
+  for _d in "$@"; do printf '%s %s: { origin: "nextbsd/%s", version: "%s" }' "$_sep" "$_d" "$_d" "$VER"; _sep=,; done
+  printf ' }\n'
+}
+# built <name> : true if this run already put <name> in the flat repo.
+built() { ls out/repo/"$1"-*.pkg >/dev/null 2>&1; }
 
 # --- 1. NextBSD-freebsd-compat (FreeBSD base: libc/libs, PAM, commands) ---
 mkdir -p stage/compat
@@ -136,7 +145,52 @@ mkdir -p stage/contrib
 tar -C stage/contrib -xzf "art/nextbsd-contrib-${ARCH}.tar.gz"
 mkpkg NextBSD-contrib stage/contrib "NextBSD third-party base programs (sudo, zsh, pico)" "$(dep NextBSD-freebsd-compat)"
 
-# --- 6. NextBSD-everything (meta: installs the whole OS for this arch) ---
+# --- 6-9. E24 (nextbsd#574): GNUstep/Gershwin requirements + the toolchain ---
+# Gershwin builds and installs GNUstep itself into /System (D10); NextBSD ships
+# only what it needs, in /usr and /usr/X11. None of these four is in
+# NextBSD-everything: Gershwin images list them in Gershwin's nextbsd.txt, and
+# NextBSD-toolchain in particular is installed by default on Gershwin images
+# only (D11). Repackaged verbatim: the artifacts carry no /etc (CUPS's config,
+# PAM stack and accounts come from nextbsd-overlays), no /usr/local and no
+# ldconfig drop-in, and nothing runs ldconfig after install (rtld's default
+# path covers /usr/X11/lib; see pkg#25).
+#
+# X libraries: cairo (gnustep-support) and xdotool (gershwin-support) link
+# libX11, libxcb, pixman, freetype, fontconfig and friends from NextBSD-xlibs.
+# TODO(pkg#25): NextBSD-xlibs isn't packaged yet. Once pkg#25 adds it ABOVE
+# this point, `built NextBSD-xlibs` is true and both packages pick up the
+# dependency with no change here; until then they carry only the base deps.
+XDEP=
+built NextBSD-xlibs && XDEP=NextBSD-xlibs
+
+# 6. NextBSD-gnustep-support: image formats, GnuTLS (+ nettle, gmp), cairo
+#    (in /usr/X11), libsndfile + libao, SQLite, flite, FFmpeg.
+mkdir -p stage/gnustep
+tar -C stage/gnustep -xzf "art/nextbsd-gnustep-support-${ARCH}.tar.gz"
+mkpkg NextBSD-gnustep-support stage/gnustep "NextBSD GNUstep support libraries (image formats, GnuTLS, cairo, sound, SQLite, flite, FFmpeg)" "$(deps NextBSD-freebsd-compat $XDEP)"
+
+# 7. NextBSD-printing-support: Apple's CUPS. GnuTLS comes from
+#    gnustep-support; liblaunch (launch_activate_socket) and libdns_sd from
+#    the userland. The compat base drops the BSD LPD suite that CUPS's lp, lpr,
+#    lpq, lprm and lpc replace (nextbsd-freebsd-compat scripts/superseded).
+mkdir -p stage/printing
+tar -C stage/printing -xzf "art/nextbsd-printing-support-${ARCH}.tar.gz"
+mkpkg NextBSD-printing-support stage/printing "NextBSD printing support (Apple's CUPS)" "$(deps NextBSD-freebsd-compat NextBSD-userland NextBSD-gnustep-support)"
+
+# 8. NextBSD-gershwin-support: what only Gershwin uses (wget, xdotool in
+#    /usr/X11, lcms2, squashfs-tools-ng + squashfuse with libfuse3/zstd/lz4).
+mkdir -p stage/gershwin
+tar -C stage/gershwin -xzf "art/nextbsd-gershwin-support-${ARCH}.tar.gz"
+mkpkg NextBSD-gershwin-support stage/gershwin "NextBSD Gershwin support (wget, xdotool, lcms2, squashfs tools)" "$(deps NextBSD-freebsd-compat $XDEP)"
+
+# 9. NextBSD-toolchain: on-machine clang/lld 19.1.7, LLVM binutils, gmake,
+#    pkgconf and Apple's Git (client only; libcurl from the userland).
+mkdir -p stage/toolchain
+tar -C stage/toolchain -xzf "art/nextbsd-toolchain-${ARCH}.tar.gz"
+mkpkg NextBSD-toolchain stage/toolchain "NextBSD on-machine toolchain (clang/lld 19.1.7, gmake, pkgconf, Git)" "$(deps NextBSD-freebsd-compat NextBSD-userland)"
+
+# --- 10. NextBSD-everything (meta: installs the whole OS for this arch) ---
+# The E24 packages above are deliberately not in it (D11; Gershwin's nextbsd.txt).
 mkdir -p stage/everything
 {
   echo "name: NextBSD-everything"
