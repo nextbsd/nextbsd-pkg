@@ -105,8 +105,10 @@ and `/usr/X11/lib/pkgconfig`; there is no system-wide `PKG_CONFIG_PATH`.
 D14, [#26](https://github.com/nextbsd/nextbsd-pkg/issues/26). NextBSD has one X stack, in
 base. `pkg create` records the `SONAME` of every library a package ships as its
 `shlibs_provided`: pkg's `SHLIB_PROVIDE_PATHS_*` settings are unset on the build VM, so
-`/usr/lib` and `/usr/X11/lib` are not filtered out. The build log prints each display
-package's list. For example:
+`/usr/lib` and `/usr/X11/lib` are not filtered out. pkg only reads ELF files built for
+its own ABI, so `build.sh` runs `pkg create` with the target ABI pinned; otherwise the
+arm64 packages, which are built on the amd64 VM, would declare no libraries at all. The
+build log prints each display package's list. For example:
 
 | package | provides (among others) |
 |---|---|

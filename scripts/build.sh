@@ -30,7 +30,10 @@ mkdir -p out/repo
 #   an EMPTY directory names it after the deps, and it is recorded as @dir.
 #   pkg create records each ELF library's SONAME as shlibs_provided (pkg's
 #   SHLIB_PROVIDE_PATHS_* are unset, so no path is filtered out) and each
-#   NEEDED entry as shlibs_required.
+#   NEEDED entry as shlibs_required. It skips ELF files whose arch differs
+#   from its own ABI, so it runs with the TARGET ABI pinned (the VM is amd64):
+#   without that, every arm64 package would declare no shlibs at all. As in
+#   install-test.sh, pkg wants OSVERSION whenever ABI is pinned.
 mkpkg() {
   _name=$1; _root=$2; _comment=$3; _deps=$4
   shift 4
@@ -53,7 +56,8 @@ UCL
     echo "@dir ${_dir}" >> /tmp/plist
   done
   echo "=== ${_name}: $(wc -l < /tmp/plist) files ==="
-  pkg create -M /tmp/+MANIFEST -p /tmp/plist -r "${_root}" -o out/repo
+  env ABI="${ABI}" OSVERSION="$(uname -K)" \
+    pkg create -M /tmp/+MANIFEST -p /tmp/plist -r "${_root}" -o out/repo
 }
 
 dep()  { printf 'deps: { %s: { origin: "nextbsd/%s", version: "%s" } }\n' "$1" "$1" "$VER"; }
