@@ -24,6 +24,17 @@ VER="0.0.0.$(date -u +%Y%m%d%H%M%S)"
 rm -rf stage out
 mkdir -p out/repo
 
+# Every NextBSD-* package carries these two manifest entries:
+#   vital: true -- pkg refuses to delete it (pkg delete without -f, autoremove,
+#     and removal to resolve a conflict with another repo's package); upgrades
+#     still replace it. To retire a package, publish one last version without
+#     vital (README "Vital packages").
+#   annotation org.nextbsd.origin: NextBSD -- NextBSD's pkg (nextbsd-contrib)
+#     lets a local package file without it install only under /usr/local and
+#     /var, and only a stamped pkg may replace pkg.
+NBMARK='vital: true
+annotations: { "org.nextbsd.origin": "NextBSD" }'
+
 # mkpkg <name> <stagedir> <comment> <deps-ucl-or-empty> [<dir>...]
 #   Every file and symlink in <stagedir> goes in the plist. Directories are
 #   not listed (most come from the base mtree), so a package that must create
@@ -48,6 +59,7 @@ www: "https://nextbsd.org"
 abi: "${ABI}"
 arch: "${ABI}"
 prefix: "/"
+${NBMARK}
 UCL
   [ -n "${_deps}" ] && printf '%s\n' "${_deps}" >> /tmp/+MANIFEST
   ( cd "${_root}" && find . \( -type f -o -type l \) | sed 's#^\.##' ) | sort > /tmp/plist
@@ -285,6 +297,7 @@ mkdir -p stage/everything
   echo "abi: \"${ABI}\""
   echo "arch: \"${ABI}\""
   echo "prefix: \"/\""
+  echo "${NBMARK}"
   echo "deps: {"
   echo "  NextBSD-freebsd-compat: { origin: \"nextbsd/NextBSD-freebsd-compat\", version: \"${VER}\" }"
   echo "  NextBSD-kernel: { origin: \"nextbsd/NextBSD-kernel\", version: \"${VER}\" }"
@@ -299,6 +312,13 @@ pkg create -M /tmp/+MANIFEST -p /tmp/plist -r stage/everything -o out/repo
 # --- Layer A (nextbsd#370): fail if any two component packages co-own a path,
 #     BEFORE cataloging/publishing. Fast + deterministic; names the culprit. ---
 sh scripts/check-ownership.sh
+
+# Log each package's vital flag and NextBSD origin stamp (see NBMARK).
+echo "=== vital / org.nextbsd.origin ==="
+for f in out/repo/*.pkg; do
+  pkg query -F "$f" '%n vital=%V' | tr '\n' ' '
+  pkg query -F "$f" '%An=%Av' | grep '^org\.nextbsd\.origin=' || echo "(no org.nextbsd.origin)"
+done
 
 # --- catalog the flat repo ---
 echo "=== packages (${ARCH}) ==="; ls -lh out/repo/*.pkg

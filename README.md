@@ -130,9 +130,34 @@ records library dependencies by name) still installs FreeBSD's copy into `/usr/l
 `libLLVM`, so nothing in base stands in for `llvm19`. Those `/usr/local` libraries
 aren't used by programs whose search path ends at rtld's default, but a FreeBSD program
 built with an `RPATH` of `/usr/local/lib` loads them, and then one process can hold two
-copies of libX11 or freetype. Closing this needs packages in the NextBSD repo under
-FreeBSD's names (for example an empty `libX11` that depends on `NextBSD-xlibs`), so that
-the dependency resolves there first. That is a separate decision; this repo doesn't do it.
+copies of libX11 or freetype. NextBSD doesn't block FreeBSD repos over this. It protects base instead (maintainer
+decision, 2026-10-25): NextBSD's pkg (nextbsd-contrib) lets a package that isn't
+NextBSD's install only under `/usr/local` and `/var`, so a FreeBSD package can add a
+second copy there but can't overwrite or remove base. The `NextBSD-*` packages are also
+vital (below), so resolving a conflict with another repo's package can't remove them.
+Packages in the NextBSD repo under FreeBSD's names (for example an empty `libX11` that
+depends on `NextBSD-xlibs`, so the dependency resolves here first) would close the
+duplicate-library gap. They are deferred and not built here.
+
+### Vital packages and the NextBSD stamp
+
+Every `NextBSD-*` package, `NextBSD-everything` included, has two marks in its manifest:
+
+- **`vital: true`.** pkg refuses to delete a vital package: `pkg delete` without `-f`,
+  `pkg autoremove`, and removing it to resolve a conflict with another repo's package all
+  fail. Upgrades still replace it as usual.
+- **Annotation `org.nextbsd.origin: NextBSD`.** NextBSD's pkg lets a local package file
+  without this stamp install only under `/usr/local` and `/var`, and lets only a stamped
+  `pkg` replace pkg.
+
+The build log lists both marks for every package.
+
+**Retiring a vital package:** publish one last version of it without `vital` (in
+`build.sh`, leave `NBMARK`'s `vital: true` out of that package's manifest). pkg updates
+the flag as part of the upgrade, because a change to `vital` counts as a reason to
+upgrade. After that the package can be deleted or autoremoved, and only then is it
+dropped from the repo. On one machine, `pkg set -v 0 <name>` clears the flag by hand.
+`pkg delete -f` overrides it, but leaves whatever depended on the package broken.
 
 ### Upgrades and moved files
 
