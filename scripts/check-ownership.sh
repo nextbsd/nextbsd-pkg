@@ -10,9 +10,11 @@
 # the slower real install-test (Layer B, install-test.sh) would.
 set -eu
 
-# Component stage dirs created by build.sh. stage/everything is the empty meta —
+# Every component stage dir build.sh created (one per package), so a new
+# package is covered with no change here. stage/everything is the empty meta —
 # it owns nothing, so it is intentionally omitted.
-comps="compat kernel kexts userland contrib gnustep printing gershwin toolchain"
+comps=$(cd stage && for d in *; do [ -d "$d" ] && [ "$d" != everything ] && echo "$d"; done | tr '\n' ' ')
+[ -n "$comps" ] || { echo "FATAL: no component stage dirs under stage/ (build.sh did not run?)" >&2; exit 1; }
 
 owners=$(mktemp)
 trap 'rm -f "$owners" "$owners.s"' EXIT

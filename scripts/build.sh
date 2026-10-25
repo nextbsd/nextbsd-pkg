@@ -24,9 +24,16 @@ VER="0.0.0.$(date -u +%Y%m%d%H%M%S)"
 rm -rf stage out
 mkdir -p out/repo
 
-# mkpkg <name> <stagedir> <comment> <deps-ucl-or-empty>
+# mkpkg <name> <stagedir> <comment> <deps-ucl-or-empty> [<dir>...]
+#   Every file and symlink in <stagedir> goes in the plist. Directories are
+#   not listed (most come from the base mtree), so a package that must create
+#   an EMPTY directory names it after the deps, and it is recorded as @dir.
+#   pkg create records each ELF library's SONAME as shlibs_provided (pkg's
+#   SHLIB_PROVIDE_PATHS_* are unset, so no path is filtered out) and each
+#   NEEDED entry as shlibs_required.
 mkpkg() {
   _name=$1; _root=$2; _comment=$3; _deps=$4
+  shift 4
   cat > /tmp/+MANIFEST <<UCL
 name: ${_name}
 origin: nextbsd/${_name}
@@ -41,6 +48,10 @@ prefix: "/"
 UCL
   [ -n "${_deps}" ] && printf '%s\n' "${_deps}" >> /tmp/+MANIFEST
   ( cd "${_root}" && find . \( -type f -o -type l \) | sed 's#^\.##' ) | sort > /tmp/plist
+  for _dir in "$@"; do
+    [ -d "${_root}${_dir}" ] || { echo "ERROR: ${_name}: directory ${_dir} is not in its artifact" >&2; exit 1; }
+    echo "@dir ${_dir}" >> /tmp/plist
+  done
   echo "=== ${_name}: $(wc -l < /tmp/plist) files ==="
   pkg create -M /tmp/+MANIFEST -p /tmp/plist -r "${_root}" -o out/repo
 }
@@ -54,8 +65,24 @@ deps() {
   for _d in "$@"; do printf '%s %s: { origin: "nextbsd/%s", version: "%s" }' "$_sep" "$_d" "$_d" "$VER"; _sep=,; done
   printf ' }\n'
 }
-# built <name> : true if this run already put <name> in the flat repo.
-built() { ls out/repo/"$1"-*.pkg >/dev/null 2>&1; }
+# repkg <name> <stage> <comment> [<dep>...] [-- <dir>...]
+#   Repackages one component repo's `continuous` artifact as is:
+#   art/nextbsd-<repo>-${ARCH}.tar.gz (NextBSD-<repo> lowercased) is unpacked
+#   into stage/<stage> and packaged as <name>, depending on the same-snapshot
+#   NextBSD-* packages listed. Directories after `--` are recorded as @dir
+#   (see mkpkg). Adding a repo is one call here plus one download in the
+#   workflow.
+repkg() {
+  _rname=$1; _rstage=stage/$2; _rcomment=$3; shift 3
+  _rdeps=
+  while [ $# -gt 0 ] && [ "$1" != -- ]; do _rdeps="$_rdeps $1"; shift; done
+  [ "${1:-}" = -- ] && shift
+  _rart="art/$(echo "$_rname" | tr '[:upper:]' '[:lower:]')-${ARCH}.tar.gz"
+  mkdir -p "$_rstage"
+  tar -C "$_rstage" -xzf "$_rart"
+  # shellcheck disable=SC2086 # word-splitting the dep list is intended
+  mkpkg "$_rname" "$_rstage" "$_rcomment" "$([ -n "$_rdeps" ] && deps $_rdeps)" "$@"
+}
 
 # --- 1. NextBSD-freebsd-compat (FreeBSD base: libc/libs, PAM, commands) ---
 mkdir -p stage/compat
@@ -141,11 +168,69 @@ mkpkg NextBSD-userland stage/userland "NextBSD Darwin/Mach userland (Mach, launc
 # NextBSD-freebsd-compat alone. Repackaged verbatim: the tarball carries the
 # modes the build staged, including setuid on /usr/bin/sudo (tar as root keeps
 # it, and pkg create records it).
-mkdir -p stage/contrib
-tar -C stage/contrib -xzf "art/nextbsd-contrib-${ARCH}.tar.gz"
-mkpkg NextBSD-contrib stage/contrib "NextBSD third-party base programs (sudo, zsh, pico)" "$(dep NextBSD-freebsd-compat)"
+repkg NextBSD-contrib contrib "NextBSD third-party base programs (sudo, zsh, pico)" NextBSD-freebsd-compat
 
-# --- 6-9. E24 (nextbsd#574): GNUstep/Gershwin requirements + the toolchain ---
+# --- 6-9. Display server stack (E23 nextbsd#561, E25 nextbsd#583) ---
+# One package per repo (E23 D13), each repackaged as is. Dependencies are the
+# artifacts' ELF NEEDED entries matched to the files the other artifacts ship.
+# None of these is in NextBSD-everything: that is still open (nextbsd#571,
+# E23 step 16), so images add them by name.
+#
+# /etc belongs to nextbsd-overlays (pkg#25): /etc/fonts, /etc/xkb,
+# /etc/libinput and the ld-elf.so.conf / PATH entries for /usr/X11 come from
+# there, not from these packages. None of them ships /usr/local or an ldconfig
+# drop-in, and nothing runs ldconfig after install: rtld's default path already
+# covers /usr/lib and /usr/X11/lib.
+#
+# Base provides the X stack (E23 D14, pkg#26): pkg create records every
+# library's SONAME below as shlibs_provided (libdrm.so.2, libX11.so.6,
+# libxcb.so.1, libGL.so.1, libEGL.so.1, libgbm.so.1, ...), so pkg treats a
+# FreeBSD package's shlibs_required on them as satisfied once these are
+# installed. pkg resolves a package's `deps` by package NAME, though, and no
+# declaration in these packages can satisfy a FreeBSD package's dependency on
+# `libX11` or `mesa-libs`; README "Base provides the X stack" has the detail.
+#
+# Upgrades: pkg owns each package's file list, and `pkg upgrade` deletes the
+# files the new version no longer lists (pkg_add_cleanup_old), so a library
+# that moves between NextBSD packages is removed from its old place in the
+# same upgrade.
+
+# 6. NextBSD-displayserver-support: what XLibre and a GNUstep WindowServer
+#    share, in /usr (E25 D4): libdrm, pixman, expat, freetype, fontconfig,
+#    libxkbcommon, xkeyboard-config, epoll-shim, the IOKit libudev, libevdev,
+#    mtdev, libinput and the linux-input shim, plus the org.nextbsd.fc-cache
+#    LaunchDaemon. libudev links libIOKit, CoreFoundation and libdispatch from
+#    the userland.
+repkg NextBSD-displayserver-support displayserver "NextBSD display server support (libdrm, pixman, freetype, fontconfig, libxkbcommon, libinput, IOKit libudev)" \
+  NextBSD-freebsd-compat NextBSD-userland
+
+# 7. NextBSD-xlibs: the X client libraries in /usr/X11, plus libxkbcommon-x11
+#    (E25 D5). libXft and libXfont2 link freetype and fontconfig, and
+#    libxkbcommon-x11 links libxkbcommon, from displayserver-support.
+repkg NextBSD-xlibs xlibs "NextBSD X client libraries in /usr/X11 (libX11, libxcb, libXext, libXft, libxkbcommon-x11, ...)" \
+  NextBSD-freebsd-compat NextBSD-displayserver-support
+
+# 8. NextBSD-mesa: libglvnd, Mesa (LLVM linked statically, no libLLVM) and
+#    GLU in /usr/X11. Links libdrm and expat from displayserver-support.
+repkg NextBSD-mesa mesa "NextBSD OpenGL stack in /usr/X11 (libglvnd, Mesa, GLU)" \
+  NextBSD-freebsd-compat NextBSD-displayserver-support NextBSD-xlibs
+
+# 9. NextBSD-xlibre: the XLibre 25.1.9 server, drivers (vesa and vmmouse on
+#    amd64 only), tools, libepoxy, libxcvt and libpciaccess in /usr/X11; the
+#    org.nextbsd.xlibre LaunchAgent (on-demand X, disabled by default); and
+#    the empty /var/db/xkb for compiled keymaps. The input stack and xkb data
+#    come from displayserver-support.
+repkg NextBSD-xlibre xlibre "NextBSD X server (XLibre 25.1.9, drivers and tools in /usr/X11)" \
+  NextBSD-freebsd-compat NextBSD-displayserver-support NextBSD-xlibs NextBSD-mesa \
+  -- /var/db/xkb
+
+# Log what each display package tells pkg it provides (pkg#26).
+for p in NextBSD-displayserver-support NextBSD-xlibs NextBSD-mesa NextBSD-xlibre; do
+  echo "=== $p shlibs_provided ==="
+  pkg query -F out/repo/"$p"-*.pkg '%b' | sort | tr '\n' ' '; echo
+done
+
+# --- 10-13. E24 (nextbsd#574): GNUstep/Gershwin requirements + the toolchain ---
 # Gershwin builds and installs GNUstep itself into /System (D10); NextBSD ships
 # only what it needs, in /usr and /usr/X11. None of these four is in
 # NextBSD-everything: Gershwin images list them in Gershwin's nextbsd.txt, and
@@ -154,43 +239,36 @@ mkpkg NextBSD-contrib stage/contrib "NextBSD third-party base programs (sudo, zs
 # PAM stack and accounts come from nextbsd-overlays), no /usr/local and no
 # ldconfig drop-in, and nothing runs ldconfig after install (rtld's default
 # path covers /usr/X11/lib; see pkg#25).
-#
-# X libraries: cairo (gnustep-support) and xdotool (gershwin-support) link
-# libX11, libxcb, pixman, freetype, fontconfig and friends from NextBSD-xlibs.
-# TODO(pkg#25): NextBSD-xlibs isn't packaged yet. Once pkg#25 adds it ABOVE
-# this point, `built NextBSD-xlibs` is true and both packages pick up the
-# dependency with no change here; until then they carry only the base deps.
-XDEP=
-built NextBSD-xlibs && XDEP=NextBSD-xlibs
 
-# 6. NextBSD-gnustep-support: image formats, GnuTLS (+ nettle, gmp), cairo
-#    (in /usr/X11), libsndfile + libao, SQLite, flite, FFmpeg.
-mkdir -p stage/gnustep
-tar -C stage/gnustep -xzf "art/nextbsd-gnustep-support-${ARCH}.tar.gz"
-mkpkg NextBSD-gnustep-support stage/gnustep "NextBSD GNUstep support libraries (image formats, GnuTLS, cairo, sound, SQLite, flite, FFmpeg)" "$(deps NextBSD-freebsd-compat $XDEP)"
+# 10. NextBSD-gnustep-support: image formats, GnuTLS (+ nettle, gmp), cairo
+#     (in /usr/X11), libsndfile + libao, SQLite, flite, FFmpeg. cairo links
+#     libX11, libxcb and libXrender from xlibs, and pixman, freetype and
+#     fontconfig from displayserver-support.
+repkg NextBSD-gnustep-support gnustep "NextBSD GNUstep support libraries (image formats, GnuTLS, cairo, sound, SQLite, flite, FFmpeg)" \
+  NextBSD-freebsd-compat NextBSD-displayserver-support NextBSD-xlibs
 
-# 7. NextBSD-printing-support: Apple's CUPS. GnuTLS comes from
-#    gnustep-support; liblaunch (launch_activate_socket) and libdns_sd from
-#    the userland. The compat base drops the BSD LPD suite that CUPS's lp, lpr,
-#    lpq, lprm and lpc replace (nextbsd-freebsd-compat scripts/superseded).
-mkdir -p stage/printing
-tar -C stage/printing -xzf "art/nextbsd-printing-support-${ARCH}.tar.gz"
-mkpkg NextBSD-printing-support stage/printing "NextBSD printing support (Apple's CUPS)" "$(deps NextBSD-freebsd-compat NextBSD-userland NextBSD-gnustep-support)"
+# 11. NextBSD-printing-support: Apple's CUPS. GnuTLS comes from
+#     gnustep-support; liblaunch (launch_activate_socket) and libdns_sd from
+#     the userland. The compat base drops the BSD LPD suite that CUPS's lp,
+#     lpr, lpq, lprm and lpc replace (nextbsd-freebsd-compat scripts/superseded).
+repkg NextBSD-printing-support printing "NextBSD printing support (Apple's CUPS)" \
+  NextBSD-freebsd-compat NextBSD-userland NextBSD-gnustep-support
 
-# 8. NextBSD-gershwin-support: what only Gershwin uses (wget, xdotool in
-#    /usr/X11, lcms2, squashfs-tools-ng + squashfuse with libfuse3/zstd/lz4).
-mkdir -p stage/gershwin
-tar -C stage/gershwin -xzf "art/nextbsd-gershwin-support-${ARCH}.tar.gz"
-mkpkg NextBSD-gershwin-support stage/gershwin "NextBSD Gershwin support (wget, xdotool, lcms2, squashfs tools)" "$(deps NextBSD-freebsd-compat $XDEP)"
+# 12. NextBSD-gershwin-support: what only Gershwin uses (wget, xdotool in
+#     /usr/X11, lcms2, squashfs-tools-ng + squashfuse with libfuse3/zstd/lz4).
+#     xdotool links libX11, libXtst and libXinerama from xlibs and
+#     libxkbcommon from displayserver-support.
+repkg NextBSD-gershwin-support gershwin "NextBSD Gershwin support (wget, xdotool, lcms2, squashfs tools)" \
+  NextBSD-freebsd-compat NextBSD-displayserver-support NextBSD-xlibs
 
-# 9. NextBSD-toolchain: on-machine clang/lld 19.1.7, LLVM binutils, gmake,
-#    pkgconf and Apple's Git (client only; libcurl from the userland).
-mkdir -p stage/toolchain
-tar -C stage/toolchain -xzf "art/nextbsd-toolchain-${ARCH}.tar.gz"
-mkpkg NextBSD-toolchain stage/toolchain "NextBSD on-machine toolchain (clang/lld 19.1.7, gmake, pkgconf, Git)" "$(deps NextBSD-freebsd-compat NextBSD-userland)"
+# 13. NextBSD-toolchain: on-machine clang/lld 19.1.7, LLVM binutils, gmake,
+#     pkgconf and Apple's Git (client only; libcurl from the userland).
+repkg NextBSD-toolchain toolchain "NextBSD on-machine toolchain (clang/lld 19.1.7, gmake, pkgconf, Git)" \
+  NextBSD-freebsd-compat NextBSD-userland
 
-# --- 10. NextBSD-everything (meta: installs the whole OS for this arch) ---
-# The E24 packages above are deliberately not in it (D11; Gershwin's nextbsd.txt).
+# --- 14. NextBSD-everything (meta: installs the whole OS for this arch) ---
+# The display stack (nextbsd#571 is still open) and the E24 packages (D11;
+# Gershwin's nextbsd.txt) are deliberately not in it.
 mkdir -p stage/everything
 {
   echo "name: NextBSD-everything"
