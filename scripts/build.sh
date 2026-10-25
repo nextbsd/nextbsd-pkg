@@ -155,7 +155,15 @@ if ls stage/kexts/System/Library/Extensions/*.kext >/dev/null 2>&1; then
     amd64) KXCOMMENT="NextBSD kernel extensions (IntelEthernet, IntelWiFi, drm graphics + virtio-gpu + NVIDIAGraphics kexts/firmware + NVIDIA userland bundle)" ;;
     *)     KXCOMMENT="NextBSD kernel extensions (drm graphics core + virtio-gpu kexts)" ;;
   esac
-  mkpkg NextBSD-kernel-extensions stage/kexts "$KXCOMMENT" "$(dep NextBSD-kernel)"
+  # The NVIDIA userland bundle's GLX and GBM libraries link libX11, libXext
+  # and libdrm. Those come from NextBSD-xlibs and -displayserver-support, and
+  # pkg would pull both in through shlibs_required, putting X into
+  # NextBSD-everything (still open, nextbsd#571). The bundle's X half is only
+  # used once X is installed, and installing NextBSD-xlibre brings these
+  # libraries, so the package doesn't require them.
+  KXIGNORE='shlibs_required_ignore: [ "libX11.so.6", "libXext.so.6", "libdrm.so.2" ]'
+  mkpkg NextBSD-kernel-extensions stage/kexts "$KXCOMMENT" "$(dep NextBSD-kernel)
+${KXIGNORE}"
   # Guard: NextBSD-kernel-extensions MUST stay mesa/llvm-free. The NVIDIA bundle
   # vendors libgbm.so.1 (nvidia-mkbundle.sh) so pkg records it as shlibs_provided
   # and adds NO mesa-libs dependency. If a change ever drops that in-package
@@ -317,7 +325,7 @@ sh scripts/check-ownership.sh
 echo "=== vital / org.nextbsd.origin ==="
 for f in out/repo/*.pkg; do
   pkg query -F "$f" '%n vital=%V' | tr '\n' ' '
-  pkg query -F "$f" '%An=%Av' | grep '^org\.nextbsd\.origin=' || echo "(no org.nextbsd.origin)"
+  pkg query -F "$f" '%At=%Av' | grep '^org\.nextbsd\.origin=' || echo "(no org.nextbsd.origin)"
 done
 
 # --- catalog the flat repo ---

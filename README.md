@@ -86,6 +86,9 @@ entries matched to the files the other artifacts ship.
   ([nextbsd#571](https://github.com/nextbsd/nextbsd/issues/571),
   [E23](https://github.com/nextbsd/nextbsd-userland/wiki/E23-Display-Server-Graphics-Stack-Plan)
   D13, step 16). Images install them by name. `NextBSD-xlibre` pulls in the rest.
+  The NVIDIA userland bundle in `NextBSD-kernel-extensions` links libX11, libXext and
+  libdrm. Its package lists them as `shlibs_required_ignore`, so that pkg doesn't pull
+  X into `NextBSD-everything` through them.
 - The [E24](https://github.com/nextbsd/nextbsd-userland/wiki/E24-GNUstep-Gershwin-Requirements-Direction)
   packages: Gershwin builds GNUstep itself (D10) and installs these requirements through
   its `nextbsd.txt`, and `NextBSD-toolchain` is installed by default on Gershwin images
