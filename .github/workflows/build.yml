@@ -148,14 +148,16 @@ jobs:
           # and so stale timestamp-versioned .pkg files don't accumulate on the release:
           #   1. upload the packages first
           #   2. upload the catalog LAST (so it only ever references packages already present)
-          #   3. prune any NextBSD-*.pkg asset that isn't part of this snapshot
+          #   3. prune any package asset that isn't part of this snapshot
+          # Packages are every .pkg in out/repo except the catalogue's own
+          # packagesite.pkg and data.pkg: the NextBSD-* packages and pkg itself.
+          keep=$(cd out/repo && ls *.pkg | grep -vxE 'packagesite\.pkg|data\.pkg')
           echo "== 1. upload packages =="
-          gh release upload "$TAG" -R "$R" out/repo/NextBSD-*.pkg --clobber
+          gh release upload "$TAG" -R "$R" $(printf 'out/repo/%s ' $keep) --clobber
           echo "== 2. upload catalog (last) =="
           gh release upload "$TAG" -R "$R" out/repo/meta* out/repo/packagesite* out/repo/data* --clobber
           echo "== 3. prune stale package assets =="
-          keep=$(cd out/repo && ls NextBSD-*.pkg)
-          for a in $(gh release view "$TAG" -R "$R" --json assets -q '.assets[].name' | grep -E '^NextBSD-.*\.pkg$'); do
+          for a in $(gh release view "$TAG" -R "$R" --json assets -q '.assets[].name' | grep -E '\.pkg$' | grep -vxE 'packagesite\.pkg|data\.pkg'); do
             if printf '%s\n' "$keep" | grep -qx "$a"; then
               :
             else
