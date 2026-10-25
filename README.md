@@ -44,7 +44,9 @@ On NextBSD the repository is already configured. NextBSD's pkg reads
 `.../releases/download/continuous-${MACHINE}` and gives the NextBSD repo a higher
 `priority` (100) than any other. `CONSERVATIVE_UPGRADE` stays on (pkg's default). Images
 also ship FreeBSD's ports repo as `/usr/local/etc/pkg/repos/FreeBSD.conf` (built by
-nextbsd `build.sh`, default priority 0), and other repositories a user adds go there too.
+nextbsd `build.sh`, default priority 0), and other repositories a user adds go there too. The
+shipped FreeBSD repo is **temporary** and will be dropped from the images in the future;
+users who want FreeBSD packages will then add it themselves.
 
 With another pkg (FreeBSD's, for example, building an image), use a repo file for the
 architecture:
