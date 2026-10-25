@@ -73,6 +73,15 @@ jobs:
             gh release download continuous -R "nextbsd/nextbsd-$r" \
               --pattern "nextbsd-$r-${ARCH}.tar.gz" --dir art --clobber
           done
+          # NextBSD's own pkg (pkg#19), built by nextbsd-contrib in its own
+          # artifact: packaged as `pkg` for this arch, and the amd64 build's
+          # pkg-static (in art/tool/) is what build.sh runs on the amd64 VM
+          # for pkg create and pkg repo, whichever arch is being packaged.
+          gh release download continuous -R nextbsd/nextbsd-contrib \
+            --pattern "nextbsd-contrib-pkg-${ARCH}.tar.gz" --dir art --clobber
+          mkdir -p art/tool
+          gh release download continuous -R nextbsd/nextbsd-contrib \
+            --pattern "nextbsd-contrib-pkg-amd64.tar.gz" --dir art/tool --clobber
           # Graphics kexts are per-arch: BOTH arches ship a stack (amd64 the
           # drm core + Intel/AMD/Radeon/Bochs/VBox, arm64 the drm core + the
           # virtio-gpu trio), under the same bundle names — hence the -${ARCH}

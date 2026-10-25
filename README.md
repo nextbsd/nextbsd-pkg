@@ -28,16 +28,26 @@ nextbsd-toolchain ─────────┘
            users:  pkg update && pkg upgrade     ISO builder:  pkg install NextBSD-everything
 ```
 
-- **pkg runs in a FreeBSD VM** (vmactions) — the Linux runner only downloads the
-  (public) artifacts and uploads the Release assets.
-- **Triggered by `userland-updated` and `contrib-updated`**, plus
-  `workflow_dispatch` as a manual escape hatch for kernel/kext-only repackages.
-  PRs build but never publish.
+- **Packaging runs in a FreeBSD VM** (vmactions); the Linux runner only downloads the
+  (public) artifacts and uploads the Release assets. `pkg create` and `pkg repo` use
+  **NextBSD's own pkg** (`pkg-static` from the nextbsd-contrib artifact, the same build
+  the `pkg` package ships), with an explicit empty config (`-C`) and repo directory
+  (`-R`), not the VM's FreeBSD pkg. `install-test.sh` still installs with the VM's pkg.
+- **Publishing is manual** (`workflow_dispatch`). Pull requests build and install-test
+  but never publish.
 - **Flat repo on Release assets** (asset names can't contain `/`), one tag per arch.
 
 ## Consuming the repo
 
-Drop a `NextBSD.conf` matching your architecture into `/usr/local/etc/pkg/repos/`:
+On NextBSD the repository is already configured. NextBSD's pkg reads
+`/private/etc/pkg.conf` and `/private/etc/pkg/`, and `/private/etc/pkg/NextBSD.conf`
+(from nextbsd-overlays, not from any package) points at
+`.../releases/download/continuous-${MACHINE}` and gives the NextBSD repo a higher
+`priority` than any other. `CONSERVATIVE_UPGRADE` stays on (pkg's default). Repositories a
+user adds go in `/usr/local/etc/pkg/repos/`.
+
+With another pkg (FreeBSD's, for example, building an image), use a repo file for the
+architecture:
 
 ```
 # amd64
@@ -53,7 +63,7 @@ Then install the whole OS via the meta-package (and upgrade as CI republishes):
 
 ```sh
 pkg update
-pkg install NextBSD-everything      # base + kernel + userland + contrib + kernel-extensions
+pkg install NextBSD-everything      # base + kernel + userland + contrib + kernel-extensions + pkg
 pkg upgrade                    # rolling: picks up each new snapshot
 ```
 
@@ -74,7 +84,8 @@ pkg upgrade                    # rolling: picks up each new snapshot
 | `NextBSD-printing-support` | ✓ | ✓ | nextbsd-printing-support (Apple's CUPS; GnuTLS from gnustep-support) | compat, userland, gnustep-support | — |
 | `NextBSD-gershwin-support` | ✓ | ✓ | nextbsd-gershwin-support (what only Gershwin uses: wget, xdotool in /usr/X11, lcms2, squashfs tools) | compat, displayserver-support, xlibs | — |
 | `NextBSD-toolchain` | ✓ | ✓ | nextbsd-toolchain (on-machine clang/lld 19.1.7, gmake, pkgconf, Apple's Git) | compat, userland | — |
-| `NextBSD-everything` (meta) | ✓ | ✓ | — | base, kernel, userland, contrib and kernel-extensions | |
+| `pkg` | ✓ | ✓ | nextbsd-contrib's pkg artifact (NextBSD's pkg(8) 2.8.4; version from its `pkg.pc`) | compat | ✓ |
+| `NextBSD-everything` (meta) | ✓ | ✓ | — | base, kernel, userland, contrib, kernel-extensions and pkg | |
 
 Each package repackages its repo's `continuous` artifact as is, and every package of
 one run shares one snapshot version. The dependencies are the artifacts' ELF `NEEDED`
@@ -101,6 +112,31 @@ entries matched to the files the other artifacts ship.
 ldconfig drop-in, and nothing runs `ldconfig` after install: rtld's default path already
 covers `/usr/lib` and `/usr/X11/lib`. The `.pc` files stay in `/usr/libdata/pkgconfig`
 and `/usr/X11/lib/pkgconfig`; there is no system-wide `PKG_CONFIG_PATH`.
+
+### pkg
+
+`pkg` is NextBSD's own pkg(8). Its source is in nextbsd-contrib, under
+[`src/pkg`](https://github.com/nextbsd/nextbsd-contrib/tree/main/src/pkg): a frozen copy
+of upstream pkg 2.8.4 with the NextBSD patches described in its `NEXTBSD.md`. Design:
+[pkg comes only from the NextBSD repo](https://github.com/nextbsd/nextbsd-pkg/wiki/NextBSD-pkg-only-from-NextBSD).
+
+- pkg is never installed or upgraded from a repository other than `NextBSD`, and from a
+  package file only if the file carries the `org.nextbsd.origin: NextBSD` stamp.
+- A package not from the NextBSD repo, or a package file without the stamp, may only
+  install under `/usr/local` and `/var`.
+- Everything is under `/usr` (`/usr/sbin/pkg`, `pkg-static`, `libpkg.so.4`). The package
+  ships **no configuration**: `/private/etc/pkg.conf` and `/private/etc/pkg/NextBSD.conf`
+  come from nextbsd-overlays.
+- Its version is pkg's own (`2.8.4`), not the snapshot version, so it compares correctly
+  with any other repository's pkg. A rebuild at the same pkg version doesn't upgrade
+  installed systems.
+
+**Transitional:** the compat base still ships FreeBSD's `/usr/sbin/pkg` bootstrap shim
+until nextbsd-freebsd-compat#62 is merged and the base rebuilt. Two packages owning one
+path would break the install, so `build.sh` drops exactly that file from the base before
+packaging it and logs `TRANSITIONAL: dropping /usr/sbin/pkg`. Any other clash still fails
+`check-ownership.sh`. Remove `PKG_BASE_SUPERSEDED` from `build.sh` once the log says
+`base no longer ships /usr/sbin/pkg`.
 
 ### Base provides the X stack
 
@@ -144,7 +180,7 @@ FreeBSD's names (such as an empty `libX11`) to redirect those dependencies.
 
 ### Vital packages and the NextBSD stamp
 
-Every `NextBSD-*` package, `NextBSD-everything` included, has two marks in its manifest:
+Every `NextBSD-*` package, `NextBSD-everything` and `pkg` included, has two marks in its manifest:
 
 - **`vital: true`.** pkg refuses to delete a vital package: `pkg delete` without `-f`,
   `pkg autoremove`, and removing it to resolve a conflict with another repo's package all

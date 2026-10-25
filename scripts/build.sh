@@ -13,7 +13,7 @@
 # Coherent-snapshot versioning (all share one version this run); UNSIGNED for now.
 set -eux
 
-pkg --version || pkg bootstrap -y
+pkg --version || pkg bootstrap -y   # the VM's own pkg; install-test.sh uses it
 
 ARCH="${ARCH:-amd64}"
 # pkg's ABI uses 'aarch64' for 64-bit ARM, while the artifact files are named 'arm64'.
@@ -21,8 +21,23 @@ case "$ARCH" in arm64) ABIARCH=aarch64 ;; *) ABIARCH="$ARCH" ;; esac
 ABI="FreeBSD:15:${ABIARCH}"
 VER="0.0.0.$(date -u +%Y%m%d%H%M%S)"
 
-rm -rf stage out
+rm -rf stage out tool
 mkdir -p out/repo
+
+# --- NextBSD's own pkg builds the repo (pkg#19) ---
+# `pkg create`, `pkg query` and `pkg repo` below run NextBSD's pkg-static (from
+# nextbsd-contrib, the same build the `pkg` package ships), not the VM's
+# FreeBSD pkg. The VM is amd64 whatever ${ARCH} is, so the workflow always
+# fetches the amd64 artifact as art/tool/; pkg-static is fully static and
+# built for FreeBSD 15.1, so it runs on this 15.1 VM. NextBSD's pkg reads
+# /private/etc/pkg.conf and /private/etc/pkg/, which the VM doesn't have, so
+# it gets an explicit empty config (-C) and repo directory (-R) instead and
+# never falls back to a default path.
+mkdir -p tool/root tool/repos
+tar -C tool/root -xzf art/tool/nextbsd-contrib-pkg-amd64.tar.gz ./usr/sbin/pkg-static
+: > tool/pkg.conf
+NBPKG="$PWD/tool/root/usr/sbin/pkg-static -C $PWD/tool/pkg.conf -R $PWD/tool/repos"
+$NBPKG --version
 
 # Every NextBSD-* package carries these two manifest entries:
 #   vital: true -- pkg refuses to delete it (pkg delete without -f, autoremove,
@@ -51,7 +66,7 @@ mkpkg() {
   cat > /tmp/+MANIFEST <<UCL
 name: ${_name}
 origin: nextbsd/${_name}
-version: "${VER}"
+version: "${_mver:-$VER}"
 comment: "${_comment}"
 desc: "${_comment} — NextBSD ${ARCH} ${VER} snapshot."
 maintainer: "dev@nextbsd.org"
@@ -69,7 +84,7 @@ UCL
   done
   echo "=== ${_name}: $(wc -l < /tmp/plist) files ==="
   env ABI="${ABI}" OSVERSION="$(uname -K)" \
-    pkg create -M /tmp/+MANIFEST -p /tmp/plist -r "${_root}" -o out/repo
+    $NBPKG create -M /tmp/+MANIFEST -p /tmp/plist -r "${_root}" -o out/repo
 }
 
 dep()  { printf 'deps: { %s: { origin: "nextbsd/%s", version: "%s" } }\n' "$1" "$1" "$VER"; }
@@ -81,23 +96,33 @@ deps() {
   for _d in "$@"; do printf '%s %s: { origin: "nextbsd/%s", version: "%s" }' "$_sep" "$_d" "$_d" "$VER"; _sep=,; done
   printf ' }\n'
 }
-# repkg <name> <stage> <comment> [<dep>...] [-- <dir>...]
+# repkg [-a <artifact>] [-v <version>] <name> <stage> <comment> [<dep>...] [-- <dir>...]
 #   Repackages one component repo's `continuous` artifact as is:
-#   art/nextbsd-<repo>-${ARCH}.tar.gz (NextBSD-<repo> lowercased) is unpacked
-#   into stage/<stage> and packaged as <name>, depending on the same-snapshot
-#   NextBSD-* packages listed. Directories after `--` are recorded as @dir
-#   (see mkpkg). Adding a repo is one call here plus one download in the
-#   workflow.
+#   art/nextbsd-<repo>-${ARCH}.tar.gz (NextBSD-<repo> lowercased; -a names
+#   another art/<artifact>-${ARCH}.tar.gz) is unpacked into stage/<stage> and
+#   packaged as <name>, depending on the same-snapshot NextBSD-* packages
+#   listed. The package takes the snapshot version unless -v gives its own.
+#   Directories after `--` are recorded as @dir (see mkpkg). Adding a repo is
+#   one call here plus one download in the workflow.
 repkg() {
+  _rartbase=; _mver=
+  while :; do
+    case "$1" in
+      -a) _rartbase=$2; shift 2 ;;
+      -v) _mver=$2; shift 2 ;;
+      *) break ;;
+    esac
+  done
   _rname=$1; _rstage=stage/$2; _rcomment=$3; shift 3
   _rdeps=
   while [ $# -gt 0 ] && [ "$1" != -- ]; do _rdeps="$_rdeps $1"; shift; done
   [ "${1:-}" = -- ] && shift
-  _rart="art/$(echo "$_rname" | tr '[:upper:]' '[:lower:]')-${ARCH}.tar.gz"
+  _rart="art/${_rartbase:-$(echo "$_rname" | tr '[:upper:]' '[:lower:]')}-${ARCH}.tar.gz"
   mkdir -p "$_rstage"
   tar -C "$_rstage" -xzf "$_rart"
   # shellcheck disable=SC2086 # word-splitting the dep list is intended
   mkpkg "$_rname" "$_rstage" "$_rcomment" "$([ -n "$_rdeps" ] && deps $_rdeps)" "$@"
+  _mver=
 }
 
 # --- 1. NextBSD-freebsd-compat (FreeBSD base: libc/libs, PAM, commands) ---
@@ -108,6 +133,23 @@ tar -C stage/compat -xzf "art/nextbsd-base-${ARCH}.tar.gz"
 # base<->userland overlap not in its allowlist), so the base tarball arrives
 # already clean. No dedup needed here anymore (the old `rm -f Block.h
 # Block_private.h` became a no-op once the base build owns collision policy).
+#
+# TRANSITIONAL (pkg#19): the `pkg` package below ships NextBSD's pkg as
+# /usr/sbin/pkg, and the base still ships FreeBSD's bootstrap shim there until
+# nextbsd-freebsd-compat#62 (scripts/superseded) is merged and its continuous
+# base rebuilt. Two packages owning one path breaks the install, so drop
+# exactly that file from the base here, and say so. Nothing else is touched:
+# any other clash still fails check-ownership.sh. Remove this block once the
+# log shows "base no longer ships".
+PKG_BASE_SUPERSEDED="/usr/sbin/pkg"
+for _p in $PKG_BASE_SUPERSEDED; do
+  if [ -e "stage/compat${_p}" ] || [ -L "stage/compat${_p}" ]; then
+    echo "=== TRANSITIONAL: dropping ${_p} from NextBSD-freebsd-compat (NextBSD's pkg owns it; remove once nextbsd-freebsd-compat#62 is in the base) ==="
+    rm -f "stage/compat${_p}"
+  else
+    echo "=== TRANSITIONAL: base no longer ships ${_p}; remove PKG_BASE_SUPERSEDED from build.sh ==="
+  fi
+done
 mkpkg NextBSD-freebsd-compat stage/compat "NextBSD FreeBSD-compatible base (libc, libs, PAM, login, command suites)" ""
 
 # --- 2. NextBSD-kernel (just the stripped kernel binary from the obj tree) ---
@@ -173,7 +215,7 @@ ${KXIGNORE}"
   # Fail the build loudly instead of shipping that.
   kxpkg=$(ls out/repo/NextBSD-kernel-extensions-*.pkg 2>/dev/null | head -1)
   if [ -n "$kxpkg" ]; then
-    baddep=$(pkg query -F "$kxpkg" '%dn' 2>/dev/null | grep -iE 'mesa|llvm|gallium' || true)
+    baddep=$($NBPKG query -F "$kxpkg" '%dn' 2>/dev/null | grep -iE 'mesa|llvm|gallium' || true)
     [ -z "$baddep" ] || { echo "ERROR: NextBSD-kernel-extensions gained a forbidden dependency: $baddep" >&2; echo "  libgbm.so.1 must remain shlibs_provided by the bundle (nvidia-mkbundle.sh)." >&2; exit 1; }
     echo "=== guard OK: NextBSD-kernel-extensions has no mesa/llvm dependency ==="
   fi
@@ -251,7 +293,7 @@ repkg NextBSD-xlibre xlibre "NextBSD X server (XLibre 25.1.9, drivers and tools 
 # Log what each display package tells pkg it provides (pkg#26).
 for p in NextBSD-displayserver-support NextBSD-xlibs NextBSD-mesa NextBSD-xlibre; do
   echo "=== $p shlibs_provided ==="
-  pkg query -F out/repo/"$p"-*.pkg '%b' | sort | tr '\n' ' '; echo
+  $NBPKG query -F out/repo/"$p"-*.pkg '%b' | sort | tr '\n' ' '; echo
 done
 
 # --- 10-13. E24 (nextbsd#574): GNUstep/Gershwin requirements + the toolchain ---
@@ -290,7 +332,23 @@ repkg NextBSD-gershwin-support gershwin "NextBSD Gershwin support (wget, xdotool
 repkg NextBSD-toolchain toolchain "NextBSD on-machine toolchain (clang/lld 19.1.7, gmake, pkgconf, Git)" \
   NextBSD-freebsd-compat NextBSD-userland
 
-# --- 14. NextBSD-everything (meta: installs the whole OS for this arch) ---
+# --- 14. pkg: NextBSD's own pkg(8) (pkg#19) ---
+# Built by nextbsd-contrib from its frozen pkg 2.8.4 with the NextBSD patches
+# (src/pkg, NEXTBSD.md): pkg comes only from the repository named NextBSD; a
+# package not from it, or a package file without org.nextbsd.origin=NextBSD,
+# may only install under /usr/local and /var. Everything is under /usr. The
+# package ships no configuration: /private/etc/pkg.conf and
+# /private/etc/pkg/NextBSD.conf (which sets the NextBSD repo's priority) come
+# from nextbsd-overlays. Its version is pkg's own (pkg.pc's Version:), not the
+# snapshot, so it compares correctly with other repositories' pkg.
+mkdir -p tool/pc
+tar -C tool/pc -xzf "art/nextbsd-contrib-pkg-${ARCH}.tar.gz" ./usr/libdata/pkgconfig/pkg.pc
+PKGVER=$(sed -n 's/^Version: *//p' tool/pc/usr/libdata/pkgconfig/pkg.pc)
+[ -n "$PKGVER" ] || { echo "ERROR: no Version: in the contrib pkg artifact's pkg.pc" >&2; exit 1; }
+repkg -a nextbsd-contrib-pkg -v "$PKGVER" pkg pkg "NextBSD's pkg(8) package manager (pkg only from the NextBSD repository)" \
+  NextBSD-freebsd-compat
+
+# --- 15. NextBSD-everything (meta: installs the whole OS for this arch) ---
 # The display stack (nextbsd#571 is still open) and the E24 packages (D11;
 # Gershwin's nextbsd.txt) are deliberately not in it.
 mkdir -p stage/everything
@@ -298,7 +356,7 @@ mkdir -p stage/everything
   echo "name: NextBSD-everything"
   echo "origin: nextbsd/NextBSD-everything"
   echo "version: \"${VER}\""
-  echo "comment: \"NextBSD-everything meta-package (base + kernel + userland + contrib$([ "$HAVE_KEXTS" = 1 ] && echo ' + kernel-extensions'))\""
+  echo "comment: \"NextBSD-everything meta-package (base + kernel + userland + contrib + pkg$([ "$HAVE_KEXTS" = 1 ] && echo ' + kernel-extensions'))\""
   echo "desc: \"Installs the complete NextBSD ${ARCH} OS snapshot ${VER}.\""
   echo "maintainer: \"dev@nextbsd.org\""
   echo "www: \"https://nextbsd.org\""
@@ -311,11 +369,13 @@ mkdir -p stage/everything
   echo "  NextBSD-kernel: { origin: \"nextbsd/NextBSD-kernel\", version: \"${VER}\" }"
   echo "  NextBSD-userland: { origin: \"nextbsd/NextBSD-userland\", version: \"${VER}\" }"
   echo "  NextBSD-contrib: { origin: \"nextbsd/NextBSD-contrib\", version: \"${VER}\" }"
+  echo "  pkg: { origin: \"nextbsd/pkg\", version: \"${PKGVER}\" }"
   [ "$HAVE_KEXTS" = 1 ] && echo "  NextBSD-kernel-extensions: { origin: \"nextbsd/NextBSD-kernel-extensions\", version: \"${VER}\" }"
   echo "}"
 } > /tmp/+MANIFEST
 : > /tmp/plist
-pkg create -M /tmp/+MANIFEST -p /tmp/plist -r stage/everything -o out/repo
+env ABI="${ABI}" OSVERSION="$(uname -K)" \
+  $NBPKG create -M /tmp/+MANIFEST -p /tmp/plist -r stage/everything -o out/repo
 
 # --- Layer A (nextbsd#370): fail if any two component packages co-own a path,
 #     BEFORE cataloging/publishing. Fast + deterministic; names the culprit. ---
@@ -324,11 +384,11 @@ sh scripts/check-ownership.sh
 # Log each package's vital flag and NextBSD origin stamp (see NBMARK).
 echo "=== vital / org.nextbsd.origin ==="
 for f in out/repo/*.pkg; do
-  pkg query -F "$f" '%n vital=%V' | tr '\n' ' '
-  pkg query -F "$f" '%At=%Av' | grep '^org\.nextbsd\.origin=' || echo "(no org.nextbsd.origin)"
+  $NBPKG query -F "$f" '%n vital=%V' | tr '\n' ' '
+  $NBPKG query -F "$f" '%At=%Av' | grep '^org\.nextbsd\.origin=' || echo "(no org.nextbsd.origin)"
 done
 
 # --- catalog the flat repo ---
 echo "=== packages (${ARCH}) ==="; ls -lh out/repo/*.pkg
-pkg repo out/repo
+$NBPKG repo out/repo
 echo "=== flat repo catalog ==="; ls -lh out/repo
