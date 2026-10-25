@@ -133,23 +133,6 @@ tar -C stage/compat -xzf "art/nextbsd-base-${ARCH}.tar.gz"
 # base<->userland overlap not in its allowlist), so the base tarball arrives
 # already clean. No dedup needed here anymore (the old `rm -f Block.h
 # Block_private.h` became a no-op once the base build owns collision policy).
-#
-# TRANSITIONAL (pkg#19): the `pkg` package below ships NextBSD's pkg as
-# /usr/sbin/pkg, and the base still ships FreeBSD's bootstrap shim there until
-# nextbsd-freebsd-compat#62 (scripts/superseded) is merged and its continuous
-# base rebuilt. Two packages owning one path breaks the install, so drop
-# exactly that file from the base here, and say so. Nothing else is touched:
-# any other clash still fails check-ownership.sh. Remove this block once the
-# log shows "base no longer ships".
-PKG_BASE_SUPERSEDED="/usr/sbin/pkg"
-for _p in $PKG_BASE_SUPERSEDED; do
-  if [ -e "stage/compat${_p}" ] || [ -L "stage/compat${_p}" ]; then
-    echo "=== TRANSITIONAL: dropping ${_p} from NextBSD-freebsd-compat (NextBSD's pkg owns it; remove once nextbsd-freebsd-compat#62 is in the base) ==="
-    rm -f "stage/compat${_p}"
-  else
-    echo "=== TRANSITIONAL: base no longer ships ${_p}; remove PKG_BASE_SUPERSEDED from build.sh ==="
-  fi
-done
 mkpkg NextBSD-freebsd-compat stage/compat "NextBSD FreeBSD-compatible base (libc, libs, PAM, login, command suites)" ""
 
 # --- 2. NextBSD-kernel (just the stripped kernel binary from the obj tree) ---

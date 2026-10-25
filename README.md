@@ -130,12 +130,8 @@ of upstream pkg 2.8.4 with the NextBSD patches described in its `NEXTBSD.md`. De
   with any other repository's pkg. A rebuild at the same pkg version doesn't upgrade
   installed systems.
 
-**Transitional:** the compat base still ships FreeBSD's `/usr/sbin/pkg` bootstrap shim
-until nextbsd-freebsd-compat#62 is merged and the base rebuilt. Two packages owning one
-path would break the install, so `build.sh` drops exactly that file from the base before
-packaging it and logs `TRANSITIONAL: dropping /usr/sbin/pkg`. Any other clash still fails
-`check-ownership.sh`. Remove `PKG_BASE_SUPERSEDED` from `build.sh` once the log says
-`base no longer ships /usr/sbin/pkg`.
+The compat base no longer ships FreeBSD's `/usr/sbin/pkg` bootstrap shim, its `pkg.7`
+page or its key (nextbsd-freebsd-compat#62), so `pkg` owns `/usr/sbin/pkg` alone.
 
 ### Base provides the X stack
 
