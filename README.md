@@ -42,8 +42,9 @@ On NextBSD the repository is already configured. NextBSD's pkg reads
 `/private/etc/pkg.conf` and `/private/etc/pkg/`, and `/private/etc/pkg/NextBSD.conf`
 (from nextbsd-overlays, not from any package) points at
 `.../releases/download/continuous-${MACHINE}` and gives the NextBSD repo a higher
-`priority` than any other. `CONSERVATIVE_UPGRADE` stays on (pkg's default). Repositories a
-user adds go in `/usr/local/etc/pkg/repos/`.
+`priority` (100) than any other. `CONSERVATIVE_UPGRADE` stays on (pkg's default). Images
+also ship FreeBSD's ports repo as `/usr/local/etc/pkg/repos/FreeBSD.conf` (built by
+nextbsd `build.sh`, default priority 0), and other repositories a user adds go there too.
 
 With another pkg (FreeBSD's, for example, building an image), use a repo file for the
 architecture:
@@ -81,7 +82,7 @@ pkg upgrade                    # rolling: picks up each new snapshot
 | `NextBSD-xlibre` | ✓ | ✓ | nextbsd-xlibre (XLibre 25.1.9 server, drivers, tools, libepoxy, libxcvt, libpciaccess in `/usr/X11`; the `org.nextbsd.xlibre` LaunchAgent; an empty `/var/db/xkb`). `vesa` and `vmmouse` are amd64 only | compat, displayserver-support, xlibs, mesa | — |
 | `NextBSD-gnustep-support` | ✓ | ✓ | nextbsd-gnustep-support (what GNUstep needs: image formats, GnuTLS, cairo in /usr/X11, sound, SQLite, flite, FFmpeg) | compat, displayserver-support, xlibs | — |
 | `NextBSD-printing-support` | ✓ | ✓ | nextbsd-printing-support (Apple's CUPS; GnuTLS from gnustep-support) | compat, userland, gnustep-support | — |
-| `NextBSD-toolchain` | ✓ | ✓ | nextbsd-toolchain (on-machine clang/lld 19.1.7, gmake, pkgconf, Apple's Git) | compat, userland | — |
+| `NextBSD-toolchain` | ✓ | ✓ | nextbsd-toolchain (on-machine clang/lld 19.1.7, gmake, pkgconf, Apple's Git, CMake, GNU m4/autoconf/automake/libtool and their private Perl) | compat, userland | — |
 | `pkg` | ✓ | ✓ | nextbsd-contrib's pkg artifact (NextBSD's pkg(8) 2.8.4; version from its `pkg.pc`) | compat | ✓ |
 | `NextBSD-everything` (meta) | ✓ | ✓ | — | base, kernel, userland, contrib, kernel-extensions and pkg | |
 
@@ -89,20 +90,27 @@ Each package repackages its repo's `continuous` artifact as is, and every packag
 one run shares one snapshot version. The dependencies are the artifacts' ELF `NEEDED`
 entries matched to the files the other artifacts ship.
 
-**Not in `NextBSD-everything`:**
-- The display server stack (`displayserver-support`, `xlibs`, `mesa`, `xlibre`):
-  whether `NextBSD-everything` includes X is still open
-  ([nextbsd#571](https://github.com/nextbsd/nextbsd/issues/571),
-  [E23](https://github.com/nextbsd/nextbsd-userland/wiki/E23-Display-Server-Graphics-Stack-Plan)
-  D13, step 16). Images install them by name. `NextBSD-xlibre` pulls in the rest.
-  The NVIDIA userland bundle in `NextBSD-kernel-extensions` links libX11, libXext and
-  libdrm. Its package lists them as `shlibs_required_ignore`, so that pkg doesn't pull
-  X into `NextBSD-everything` through them.
-- The [E24](https://github.com/nextbsd/nextbsd-userland/wiki/E24-GNUstep-Gershwin-Requirements-Direction)
-  packages: Gershwin builds GNUstep itself (D10) and installs these requirements through
-  its `nextbsd.txt`, and `NextBSD-toolchain` is installed by default on Gershwin images
-  only (D11). nextbsd-gershwin-support is deliberately **not** packaged (maintainer,
-  2026-10-25), and no package depends on it.
+**Optional base packages.** `NextBSD-everything` is the core OS only: base, kernel,
+userland, contrib, kernel-extensions and pkg. Everything else NextBSD publishes is an
+**optional base package**: built and stamped like the core set, installed into `/usr`
+or `/usr/X11` (never `/usr/local`), but only installed when a user or an image asks for
+it by name. No meta-package pulls them in (maintainer decision,
+[nextbsd#571](https://github.com/nextbsd/nextbsd/issues/571)).
+
+| optional package | installs | pulls in |
+|---|---|---|
+| `NextBSD-xlibre` | the X server | displayserver-support, xlibs, mesa |
+| `NextBSD-mesa` | OpenGL | displayserver-support, xlibs |
+| `NextBSD-xlibs` | X client libraries | displayserver-support |
+| `NextBSD-displayserver-support` | libraries shared by display servers | — |
+| `NextBSD-gnustep-support` | libraries GNUstep needs | displayserver-support, xlibs |
+| `NextBSD-printing-support` | Apple's CUPS | gnustep-support |
+| `NextBSD-toolchain` | the on-machine compiler and build tools | — |
+
+The NVIDIA userland bundle in `NextBSD-kernel-extensions` links libX11, libXext and
+libdrm. Its package lists them as `shlibs_required_ignore`, so pkg doesn't pull X into
+`NextBSD-everything` through them. nextbsd-gershwin-support is deliberately **not**
+packaged (maintainer, 2026-10-25), and no package depends on it.
 
 **`/etc` belongs to nextbsd-overlays, not these packages** (decision on
 [#25](https://github.com/nextbsd/nextbsd-pkg/issues/25)): `/etc/fonts`, `/etc/xkb`,

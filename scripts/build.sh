@@ -308,7 +308,7 @@ repkg NextBSD-printing-support printing "NextBSD printing support (Apple's CUPS)
 
 # 12. NextBSD-toolchain: on-machine clang/lld 19.1.7, LLVM binutils, gmake,
 #     pkgconf and Apple's Git (client only; libcurl from the userland).
-repkg NextBSD-toolchain toolchain "NextBSD on-machine toolchain (clang/lld 19.1.7, gmake, pkgconf, Git)" \
+repkg NextBSD-toolchain toolchain "NextBSD on-machine toolchain (clang/lld 19.1.7, gmake, pkgconf, Git, CMake, autotools)" \
   NextBSD-freebsd-compat NextBSD-userland
 
 # --- 13. pkg: NextBSD's own pkg(8) (pkg#19) ---
