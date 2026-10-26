@@ -267,24 +267,36 @@ repkg NextBSD-displayserver-support displayserver "NextBSD display server suppor
 repkg NextBSD-xlibs xlibs "NextBSD X client libraries in /usr/X11 (libX11, libxcb, libXext, libXft, libxkbcommon-x11, ...)" \
   NextBSD-freebsd-compat NextBSD-displayserver-support
 
-# 8. NextBSD-mesa: libglvnd, Mesa (LLVM linked statically, no libLLVM) and
-#    GLU in /usr/X11. Links libdrm and expat from displayserver-support.
-repkg NextBSD-mesa mesa "NextBSD OpenGL stack in /usr/X11 (libglvnd, Mesa, GLU)" \
-  NextBSD-freebsd-compat NextBSD-displayserver-support NextBSD-xlibs
+# 8. NextBSD-mesa: nextbsd-mesa's X-free core artifact in /usr/X11: libglvnd's
+#    EGL, GLES, OpenGL and dispatch libraries, Mesa's core build (libgallium
+#    with LLVM linked statically, no libLLVM; libEGL_mesa_core, libgbm,
+#    dri_gbm, the DRI drivers) and GLU. Links libdrm and expat from
+#    displayserver-support and nothing from xlibs (nextbsd-mesa#10, pkg#34).
+repkg NextBSD-mesa mesa "NextBSD OpenGL, EGL and GBM in /usr/X11 (libglvnd, Mesa, GLU; no X)" \
+  NextBSD-freebsd-compat NextBSD-displayserver-support
+
+# 8b. NextBSD-mesa-x11: nextbsd-mesa's X artifact (nextbsd-mesa-x11-<arch>):
+#     Mesa's GLX (libGLX_mesa, libGLX_indirect) and x11 EGL vendor
+#     (libEGL_mesa, 50_mesa.json), libglvnd's libGL and libGLX, the GLX
+#     headers, gl.pc and glx.pc. They run against NextBSD-mesa's libgallium
+#     and link the X client libraries.
+repkg NextBSD-mesa-x11 mesa-x11 "NextBSD Mesa X11 parts in /usr/X11 (GLX, libGL, the X11 EGL vendor)" \
+  NextBSD-freebsd-compat NextBSD-mesa NextBSD-xlibs
 
 # 9. NextBSD-xlibre: the XLibre 25.1.9 server, drivers (vesa and vmmouse on
 #    amd64 only), tools, libepoxy, libxcvt and libpciaccess in /usr/X11; the
 #    org.nextbsd.xlibre LaunchAgent (on-demand X, disabled by default); and
 #    the empty /var/db/xkb for compiled keymaps. The input stack and xkb data
-#    come from displayserver-support.
+#    come from displayserver-support. glamor and GLX (libglamoregl.so,
+#    extensions/libglx.so) link libGL.so.1 from NextBSD-mesa-x11.
 repkg NextBSD-xlibre xlibre "NextBSD X server (XLibre 25.1.9, drivers and tools in /usr/X11)" \
-  NextBSD-freebsd-compat NextBSD-displayserver-support NextBSD-xlibs NextBSD-mesa \
+  NextBSD-freebsd-compat NextBSD-displayserver-support NextBSD-xlibs NextBSD-mesa NextBSD-mesa-x11 \
   -- /var/db/xkb
 
 # Log what each display package tells pkg it provides (pkg#26).
-for p in NextBSD-displayserver-support NextBSD-xlibs NextBSD-mesa NextBSD-xlibre; do
+for p in NextBSD-displayserver-support NextBSD-xlibs NextBSD-mesa NextBSD-mesa-x11 NextBSD-xlibre; do
   echo "=== $p shlibs_provided ==="
-  $NBPKG query -F out/repo/"$p"-*.pkg '%b' | sort | tr '\n' ' '; echo
+  $NBPKG query -F out/repo/"$p"-[0-9]*.pkg '%b' | sort | tr '\n' ' '; echo
 done
 
 # --- 10-12. E24 (nextbsd#574): GNUstep/Gershwin requirements + the toolchain ---

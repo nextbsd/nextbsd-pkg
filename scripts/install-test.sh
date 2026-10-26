@@ -11,6 +11,8 @@
 # syslog.3.gz bug was a *successful* `pkg install` that just dropped
 # NextBSD-userland (and with it /sbin/launchd). Only a real extraction plus a
 # per-dependency presence check catches "installed fine, minus the OS."
+# Then, in a second scratch root, it checks what the optional display
+# packages pull in (NextBSD-mesa without X, NextBSD-xlibre with it).
 set -eux
 
 pkg --version || pkg bootstrap -y
@@ -69,4 +71,39 @@ done
 [ -u "$ROOT/usr/bin/sudo" ] || { echo "FAIL: /usr/bin/sudo is not setuid after install ($(ls -l "$ROOT/usr/bin/sudo" 2>&1))" >&2; exit 1; }
 
 echo "OK (${ARCH}): NextBSD-everything installs cleanly; launchd + all deps present; sudo is setuid"
+rm -rf "$ROOT"
+
+# 4. The optional display packages pull in only what they need (pkg#34,
+#    nextbsd-mesa#10), checked in a second scratch root:
+#    - `pkg install NextBSD-mesa` (OpenGL, EGL and GBM without X) must not
+#      bring NextBSD-xlibs, NextBSD-mesa-x11 or NextBSD-xlibre, by `deps` or
+#      by shlibs_required;
+#    - `pkg install NextBSD-xlibre` on top must bring NextBSD-mesa-x11 (the
+#      server's GLX and glamor link its libGL.so.1) and NextBSD-xlibs.
+ROOT=$(mktemp -d)
+PKG="pkg -r $ROOT -o REPOS_DIR=$REPOS"
+echo "=== pkg install NextBSD-mesa into a fresh scratch root (${ARCH}) ==="
+$PKG update -f
+$PKG install -y NextBSD-mesa
+echo "installed: $($PKG query '%n' | sort | tr '\n' ' ')"
+for p in NextBSD-mesa NextBSD-displayserver-support; do
+  $PKG info -e "$p" || { echo "FAIL: pkg install NextBSD-mesa did not install $p" >&2; exit 1; }
+done
+for p in NextBSD-xlibs NextBSD-mesa-x11 NextBSD-xlibre; do
+  if $PKG info -e "$p"; then echo "FAIL: pkg install NextBSD-mesa installed $p" >&2; exit 1; fi
+done
+[ -e "$ROOT/usr/X11/lib/libgbm.so.1" ] && [ -e "$ROOT/usr/X11/lib/libEGL.so.1" ] \
+  || { echo "FAIL: NextBSD-mesa installed no libgbm.so.1/libEGL.so.1" >&2; exit 1; }
+[ ! -e "$ROOT/usr/X11/lib/libX11.so.6" ] && [ ! -e "$ROOT/usr/X11/lib/libGL.so.1" ] \
+  || { echo "FAIL: libX11.so.6 or libGL.so.1 present after pkg install NextBSD-mesa" >&2; exit 1; }
+echo "OK (${ARCH}): pkg install NextBSD-mesa installs neither NextBSD-xlibs, NextBSD-mesa-x11 nor NextBSD-xlibre"
+
+echo "=== pkg install NextBSD-xlibre into the same root (${ARCH}) ==="
+$PKG install -y NextBSD-xlibre
+echo "installed: $($PKG query '%n' | sort | tr '\n' ' ')"
+for p in NextBSD-xlibre NextBSD-mesa NextBSD-mesa-x11 NextBSD-xlibs; do
+  $PKG info -e "$p" || { echo "FAIL: pkg install NextBSD-xlibre did not install $p" >&2; exit 1; }
+done
+[ -e "$ROOT/usr/X11/lib/libGL.so.1" ] || { echo "FAIL: no libGL.so.1 after pkg install NextBSD-xlibre" >&2; exit 1; }
+echo "OK (${ARCH}): pkg install NextBSD-xlibre installs NextBSD-mesa, NextBSD-mesa-x11 and NextBSD-xlibs"
 rm -rf "$ROOT" "$REPOS"

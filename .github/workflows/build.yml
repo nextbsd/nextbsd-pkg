@@ -74,6 +74,11 @@ jobs:
             gh release download continuous -R "nextbsd/nextbsd-$r" \
               --pattern "nextbsd-$r-${ARCH}.tar.gz" --dir art --clobber
           done
+          # nextbsd-mesa publishes a second artifact, Mesa's X parts (GLX, the
+          # x11 EGL vendor, libglvnd's libGL/libGLX; nextbsd-mesa#10), packaged
+          # as NextBSD-mesa-x11.
+          gh release download continuous -R nextbsd/nextbsd-mesa \
+            --pattern "nextbsd-mesa-x11-${ARCH}.tar.gz" --dir art --clobber
           # NextBSD's own pkg (pkg#19), built by nextbsd-contrib in its own
           # artifact: packaged as `pkg` for this arch, and the amd64 build's
           # pkg-static (in art/tool/) is what build.sh runs on the amd64 VM

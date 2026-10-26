@@ -14,7 +14,7 @@ nextbsd-userland ──────────┤
 nextbsd-contrib ───────────┤
 nextbsd-displayserver-support ─┤
 nextbsd-xlibs ─────────────┤
-nextbsd-mesa ──────────────┤
+nextbsd-mesa (+ mesa-x11) ─┤
 nextbsd-xlibre ────────────┤
 nextbsd-gnustep-support ───┤
 nextbsd-printing-support ──┤
@@ -32,6 +32,10 @@ nextbsd-toolchain ─────────┘
   **NextBSD's own pkg** (`pkg-static` from the nextbsd-contrib artifact, the same build
   the `pkg` package ships), with an explicit empty config (`-C`) and repo directory
   (`-R`), not the VM's FreeBSD pkg. `install-test.sh` still installs with the VM's pkg.
+  It installs `NextBSD-everything` into a scratch root, then, in a second root, checks
+  that `pkg install NextBSD-mesa` brings neither `NextBSD-xlibs`, `NextBSD-mesa-x11` nor
+  `NextBSD-xlibre`, and that `pkg install NextBSD-xlibre` brings `NextBSD-mesa`,
+  `NextBSD-mesa-x11` and `NextBSD-xlibs`.
 - **Publishing is manual** (`workflow_dispatch`). Pull requests build and install-test
   but never publish.
 - **Flat repo on Release assets** (asset names can't contain `/`), one tag per arch.
@@ -80,15 +84,17 @@ pkg upgrade                    # rolling: picks up each new snapshot
 | `NextBSD-contrib` | ✓ | ✓ | nextbsd-contrib (third-party base programs: sudo, zsh, pico) | compat | ✓ |
 | `NextBSD-displayserver-support` | ✓ | ✓ | nextbsd-displayserver-support (in `/usr`: libdrm, pixman, expat, freetype, fontconfig, libxkbcommon, xkeyboard-config, epoll-shim, the IOKit libudev, libevdev, mtdev, libinput, the linux-input shim; the `org.nextbsd.fc-cache` LaunchDaemon) | compat, userland | — |
 | `NextBSD-xlibs` | ✓ | ✓ | nextbsd-xlibs (X client libraries in `/usr/X11`, libxkbcommon-x11) | compat, displayserver-support | — |
-| `NextBSD-mesa` | ✓ | ✓ | nextbsd-mesa (libglvnd, Mesa, GLU in `/usr/X11`) | compat, displayserver-support, xlibs | — |
-| `NextBSD-xlibre` | ✓ | ✓ | nextbsd-xlibre (XLibre 25.1.9 server, drivers, tools, libepoxy, libxcvt, libpciaccess in `/usr/X11`; the `org.nextbsd.xlibre` LaunchAgent; an empty `/var/db/xkb`). `vesa` and `vmmouse` are amd64 only | compat, displayserver-support, xlibs, mesa | — |
+| `NextBSD-mesa` | ✓ | ✓ | nextbsd-mesa's core artifact, no X (in `/usr/X11`: libglvnd's EGL, GLES, OpenGL and dispatch libraries; Mesa's libgallium, `libEGL_mesa_core`, libgbm, `dri_gbm.so`, DRI drivers; GLU) | compat, displayserver-support | — |
+| `NextBSD-mesa-x11` | ✓ | ✓ | nextbsd-mesa's X artifact, `nextbsd-mesa-x11-<arch>` (in `/usr/X11`: Mesa's GLX and x11 EGL vendor, libglvnd's `libGL` and `libGLX`, the GLX headers, `gl.pc`, `glx.pc`) | compat, mesa, xlibs | — |
+| `NextBSD-xlibre` | ✓ | ✓ | nextbsd-xlibre (XLibre 25.1.9 server, drivers, tools, libepoxy, libxcvt, libpciaccess in `/usr/X11`; the `org.nextbsd.xlibre` LaunchAgent; an empty `/var/db/xkb`). `vesa` and `vmmouse` are amd64 only | compat, displayserver-support, xlibs, mesa, mesa-x11 | — |
 | `NextBSD-gnustep-support` | ✓ | ✓ | nextbsd-gnustep-support (what GNUstep needs: image formats, GnuTLS, cairo in /usr/X11, sound, SQLite, flite, FFmpeg) | compat, displayserver-support, xlibs | — |
 | `NextBSD-printing-support` | ✓ | ✓ | nextbsd-printing-support (Apple's CUPS; GnuTLS from gnustep-support) | compat, userland, gnustep-support | — |
 | `NextBSD-toolchain` | ✓ | ✓ | nextbsd-toolchain (on-machine clang/lld 19.1.7, gmake, pkgconf, Apple's Git, CMake, GNU m4/autoconf/automake/libtool and their private Perl) | compat, userland | — |
 | `pkg` | ✓ | ✓ | nextbsd-contrib's pkg artifact (NextBSD's pkg(8) 2.8.4; version from its `pkg.pc`) | compat | ✓ |
 | `NextBSD-everything` (meta) | ✓ | ✓ | — | base, kernel, userland, contrib, kernel-extensions and pkg | |
 
-Each package repackages its repo's `continuous` artifact as is, and every package of
+Each package repackages one of its repo's `continuous` artifacts as is (nextbsd-mesa
+publishes two: `NextBSD-mesa` and `NextBSD-mesa-x11`), and every package of
 one run shares one snapshot version. The dependencies are the artifacts' ELF `NEEDED`
 entries matched to the files the other artifacts ship.
 
@@ -101,8 +107,9 @@ it by name. No meta-package pulls them in (maintainer decision,
 
 | optional package | installs | pulls in |
 |---|---|---|
-| `NextBSD-xlibre` | the X server | displayserver-support, xlibs, mesa |
-| `NextBSD-mesa` | OpenGL | displayserver-support, xlibs |
+| `NextBSD-xlibre` | the X server | displayserver-support, xlibs, mesa, mesa-x11 |
+| `NextBSD-mesa` | OpenGL, EGL and GBM, without X | displayserver-support |
+| `NextBSD-mesa-x11` | Mesa's X parts: GLX, `libGL`, the X11 EGL vendor | mesa, xlibs |
 | `NextBSD-xlibs` | X client libraries | displayserver-support |
 | `NextBSD-displayserver-support` | libraries shared by display servers | — |
 | `NextBSD-gnustep-support` | libraries GNUstep needs | displayserver-support, xlibs |
@@ -161,7 +168,8 @@ build log prints each display package's list. For example:
 |---|---|
 | `NextBSD-displayserver-support` | `libdrm.so.2` (and `libdrm_amdgpu.so.1`, `libdrm_radeon.so.1` on amd64), `libpixman-1.so.0`, `libexpat.so.1`, `libfreetype.so.6`, `libfontconfig.so.1`, `libxkbcommon.so.0`, `libinput.so.10`, `libevdev.so.2`, `libmtdev.so.1`, `libudev.so.0`, `libepoll-shim.so.0` |
 | `NextBSD-xlibs` | `libX11.so.6`, `libxcb.so.1` and the other `libxcb-*`, `libXext.so.6`, `libXrender.so.1`, `libXft.so.2`, `libXfont2.so.2`, `libxkbcommon-x11.so.0`, `libxshmfence.so.1` |
-| `NextBSD-mesa` | `libGL.so.1`, `libEGL.so.1`, `libGLESv2.so.2`, `libOpenGL.so.0`, `libGLX.so.0`, `libGLdispatch.so.0`, `libgbm.so.1`, `libGLU.so.1` |
+| `NextBSD-mesa` | `libEGL.so.1`, `libGLESv2.so.2`, `libOpenGL.so.0`, `libGLdispatch.so.0`, `libgbm.so.1`, `libGLU.so.1` |
+| `NextBSD-mesa-x11` | `libGL.so.1`, `libGLX.so.0`, `libGLX_mesa.so.0`, `libEGL_mesa.so.0` |
 | `NextBSD-xlibre` | `libepoxy.so.0`, `libxcvt.so.0`, `libpciaccess.so.0` |
 
 So once these packages are installed, pkg counts a FreeBSD package's
