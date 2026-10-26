@@ -109,10 +109,13 @@ it by name. No meta-package pulls them in (maintainer decision,
 | `NextBSD-printing-support` | Apple's CUPS | gnustep-support |
 | `NextBSD-toolchain` | the on-machine compiler and build tools | — |
 
-The NVIDIA userland bundle in `NextBSD-kernel-extensions` links libX11, libXext and
-libdrm. Its package lists them as `shlibs_required_ignore`, so pkg doesn't pull X into
-`NextBSD-everything` through them. nextbsd-gershwin-support is deliberately **not**
-packaged (maintainer, 2026-10-25), and no package depends on it.
+The NVIDIA userland bundle in `NextBSD-kernel-extensions` links libX11, libXext, libdrm
+and libgbm. Its package lists them as `shlibs_required_ignore`, so pkg doesn't pull X or
+Mesa into `NextBSD-everything` through them. The bundle's links go into `/usr/X11`
+(`/usr/share/egl/egl_external_platform.d` for NVIDIA's EGL platform files) and ship in the
+package, so they work whenever `NextBSD-mesa` or `NextBSD-xlibre` is installed later.
+nextbsd-gershwin-support is deliberately **not** packaged (maintainer, 2026-10-25), and
+no package depends on it.
 
 **`/etc` belongs to nextbsd-overlays, not these packages** (decision on
 [#25](https://github.com/nextbsd/nextbsd-pkg/issues/25)): `/etc/fonts`, `/etc/xkb`,

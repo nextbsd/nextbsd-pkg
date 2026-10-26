@@ -164,10 +164,13 @@ if ls stage/kexts/System/Library/Extensions/*.kext >/dev/null 2>&1; then
   chown -R 0:0 stage/kexts
   find stage/kexts/System/Library/Extensions -maxdepth 1 \( -name '*.kext' -o -name '*.bundle' \) -exec chmod -R go-w {} +
   # NVIDIA userland bundles (NVIDIA<NNN>.bundle) are version-locked storage for the
-  # X11/GL/EGL/GBM driver half. Activate each into the canonical /usr/local paths
-  # (symlinks) so X (auto-detect), ld.so, GLVND and Vulkan find it. Single-branch
-  # static activation — the symlinks ship in the package, targeting the bundle's
-  # final /System location. The activator ships inside the bundle (from kernel-modules).
+  # X11/GL/EGL/GBM driver half. Activate each by symlinking it into the paths X,
+  # rtld, GLVND and Mesa's GBM loader search (/usr/X11, E23 D15; bundles built
+  # before nextbsd-kernel-extensions-nvidia#2 link /usr/local instead). Static
+  # activation: the symlinks ship in the package, targeting the bundle's final
+  # /System location, so they are in place whatever is installed later and in
+  # whatever order; nothing runs at install or boot. The activator ships inside
+  # the bundle.
   for b in stage/kexts/System/Library/Extensions/*.bundle; do
     [ -d "$b" ] || continue
     act="$b/Contents/Resources/nvidia-activate.sh"
@@ -180,27 +183,32 @@ if ls stage/kexts/System/Library/Extensions/*.kext >/dev/null 2>&1; then
     amd64) KXCOMMENT="NextBSD kernel extensions (IntelEthernet, IntelWiFi, drm graphics + virtio-gpu + NVIDIAGraphics kexts/firmware + NVIDIA userland bundle)" ;;
     *)     KXCOMMENT="NextBSD kernel extensions (drm graphics core + virtio-gpu kexts)" ;;
   esac
-  # The NVIDIA userland bundle's GLX and GBM libraries link libX11, libXext
-  # and libdrm. Those come from NextBSD-xlibs and -displayserver-support, and
-  # pkg would pull both in through shlibs_required, putting X into
-  # NextBSD-everything (still open, nextbsd#571). The bundle's X half is only
-  # used once X is installed, and installing NextBSD-xlibre brings these
-  # libraries, so the package doesn't require them.
-  KXIGNORE='shlibs_required_ignore: [ "libX11.so.6", "libXext.so.6", "libdrm.so.2" ]'
+  # The NVIDIA userland bundle's GLX and GBM libraries link libX11, libXext,
+  # libdrm and libgbm. Those come from NextBSD-xlibs, -displayserver-support
+  # and -mesa, and pkg would pull them in through shlibs_required, putting X
+  # and Mesa into NextBSD-everything (still open, nextbsd#571). The bundle's X
+  # and GBM halves are only used once X or Mesa is installed, and installing
+  # NextBSD-xlibre (or NextBSD-mesa) brings these libraries, so the package
+  # doesn't require them. libgbm.so.1 used to be bundled so pkg saw it as
+  # provided; the bundle now leaves it to NextBSD-mesa
+  # (nextbsd-kernel-extensions-nvidia#2).
+  KXIGNORE='shlibs_required_ignore: [ "libX11.so.6", "libXext.so.6", "libdrm.so.2", "libgbm.so.1" ]'
   mkpkg NextBSD-kernel-extensions stage/kexts "$KXCOMMENT" "$(dep NextBSD-kernel)
 ${KXIGNORE}"
-  # Guard: NextBSD-kernel-extensions MUST stay mesa/llvm-free. The NVIDIA bundle
-  # vendors libgbm.so.1 (nvidia-mkbundle.sh) so pkg records it as shlibs_provided
-  # and adds NO mesa-libs dependency. If a change ever drops that in-package
-  # provide, `pkg create` above resolves libgbm.so.1 -> mesa-libs -> llvm19
-  # (~1.9 GB) on the build VM and silently reintroduces both the bloat and the
-  # /usr/local/lib/libgbm file conflict that evicts this package from images.
-  # Fail the build loudly instead of shipping that.
+  # Guard: NextBSD-kernel-extensions MUST stay free of Mesa, X and LLVM. pkg
+  # resolves shlibs_required against every package's shlibs_provided, so a
+  # libgbm.so.1 (or libX11/libXext/libdrm) left in shlibs_required would make
+  # `pkg install NextBSD-everything` pull NextBSD-mesa (or X) in. Fail the build
+  # instead of shipping that.
   kxpkg=$(ls out/repo/NextBSD-kernel-extensions-*.pkg 2>/dev/null | head -1)
   if [ -n "$kxpkg" ]; then
-    baddep=$($NBPKG query -F "$kxpkg" '%dn' 2>/dev/null | grep -iE 'mesa|llvm|gallium' || true)
-    [ -z "$baddep" ] || { echo "ERROR: NextBSD-kernel-extensions gained a forbidden dependency: $baddep" >&2; echo "  libgbm.so.1 must remain shlibs_provided by the bundle (nvidia-mkbundle.sh)." >&2; exit 1; }
-    echo "=== guard OK: NextBSD-kernel-extensions has no mesa/llvm dependency ==="
+    baddep=$($NBPKG query -F "$kxpkg" '%dn' 2>/dev/null | grep -iE 'mesa|llvm|gallium|xlib' || true)
+    [ -z "$baddep" ] || { echo "ERROR: NextBSD-kernel-extensions gained a forbidden dependency: $baddep" >&2; exit 1; }
+    badreq=$($NBPKG query -F "$kxpkg" '%B' 2>/dev/null | grep -E '^lib(gbm|X11|Xext|drm)\.so' || true)
+    [ -z "$badreq" ] || { echo "ERROR: NextBSD-kernel-extensions requires $badreq; it belongs in shlibs_required_ignore" >&2; exit 1; }
+    echo "=== guard OK: NextBSD-kernel-extensions requires no Mesa, X or LLVM ==="
+    echo "    shlibs_required: $($NBPKG query -F "$kxpkg" '%B' | sort | tr '\n' ' ')"
+    echo "    shlibs_provided: $($NBPKG query -F "$kxpkg" '%b' | sort | tr '\n' ' ')"
   fi
   HAVE_KEXTS=1
 else
