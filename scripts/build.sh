@@ -4,8 +4,8 @@
 # the source repo), plus a NextBSD-everything meta, into a FLAT repo (out/repo/).
 #
 # Arch-aware: both arches get every package. The kext SETS differ (arm64
-# ships the drm core + virtio-gpu trio; amd64 adds Intel/AMD/Radeon/NVIDIA/
-# Bochs/VBox), so kernel-extensions is built from whatever kext tarballs the
+# ships the drm core + virtio-gpu trio; amd64 adds Intel/AMD/Radeon/
+# Bochs/VBox, plus NVIDIA as its own package), so kernel-extensions is built from whatever kext tarballs the
 # workflow fetched for this arch — and skipped entirely if there are none. The
 # packaging itself is cross-arch on the x86 VM — pkg create just tars
 # already-built ELF with the ${ABI} label; it doesn't compile.
@@ -146,10 +146,63 @@ cp "/tmp/kx/$KPATH" stage/kernel/boot/kernel/kernel
 chmod 555 stage/kernel/boot/kernel/kernel
 mkpkg NextBSD-kernel stage/kernel "NextBSD kernel (FreeBSD 15 KBI, Mach + Darwin glue baked in)" ""
 
+# The kernel's KERNEL-BUILD-ID (<commit>.<run_id>.<run_attempt>, nextbsd-kernel#326),
+# from the same tarball. Every kext packaged below must have been built for it.
+KIDPATH=$(tar tzf "art/nextbsd-kernel-${ARCH}.tar.gz" | grep -E 'sys/NEXTBSD/KERNEL-BUILD-ID$' | head -1)
+[ -n "$KIDPATH" ] || { echo "ERROR: the kernel artifact carries no KERNEL-BUILD-ID (it predates nextbsd-kernel#326)" >&2; exit 1; }
+KERNEL_BUILD_ID=$(tar -xzOf "art/nextbsd-kernel-${ARCH}.tar.gz" "$KIDPATH")
+echo "kernel KERNEL-BUILD-ID: ${KERNEL_BUILD_ID}"
+
+# check_kext_build_ids <Extensions dir>: refuse to package any kext not built for
+# this kernel (pkg#12). Each kext records the kernel build it was compiled for as
+# NBSDKernelBuildID in its Info.plist. A mismatched kernel + kext pair boots, then
+# panics in an unrelated driver (nextbsd-kernel-extensions#46), so the whole run
+# fails rather than publish it. Same comparison as nextbsd-ci's assemble-image.sh.
+check_kext_build_ids() {
+  _bad=0; _n=0
+  for _p in $(find "$1" -path '*.kext/Contents/Info.plist' | sort); do
+    _k=${_p#"$1"/}; _k=${_k%/Contents/Info.plist}
+    _got=$(awk '/<key>NBSDKernelBuildID<\/key>/ {
+              if ($0 !~ /<string>/) getline
+              if (match($0, /<string>[^<]*<\/string>/)) print substr($0, RSTART + 8, RLENGTH - 17)
+              exit
+            }' "$_p")
+    _n=$((_n + 1))
+    if [ "$_got" != "$KERNEL_BUILD_ID" ]; then
+      echo "  MISMATCH  $_k: ${_got:-<no NBSDKernelBuildID>}" >&2
+      _bad=$((_bad + 1))
+    fi
+  done
+  if [ "$_bad" -ne 0 ]; then
+    echo "ERROR: $_bad of $_n kexts were not built for kernel ${KERNEL_BUILD_ID}; refusing to package." >&2
+    echo "       Rebuild the kexts against the current kernel first (nextbsd-kernel-extensions," >&2
+    echo "       then nextbsd-kernel-extensions-nvidia), then rerun this workflow." >&2
+    exit 1
+  fi
+  echo "=== KERNEL-BUILD-ID: all $_n kexts in $1 built for kernel ${KERNEL_BUILD_ID} ==="
+}
+
+# no_mesa_x_llvm <package>: a kext package MUST stay free of Mesa, X and LLVM. pkg
+# resolves shlibs_required against every package's shlibs_provided, so a
+# libgbm.so.1 (or libX11/libXext/libdrm) left in shlibs_required would make
+# `pkg install NextBSD-everything` pull NextBSD-mesa (or X) in. Fail the build
+# instead of shipping that.
+no_mesa_x_llvm() {
+  _pkg=$(ls out/repo/"$1"-[0-9]*.pkg 2>/dev/null | head -1)
+  [ -n "$_pkg" ] || { echo "ERROR: $1 was not built" >&2; exit 1; }
+  _baddep=$($NBPKG query -F "$_pkg" '%dn' 2>/dev/null | grep -iE 'mesa|llvm|gallium|xlib' || true)
+  [ -z "$_baddep" ] || { echo "ERROR: $1 gained a forbidden dependency: $_baddep" >&2; exit 1; }
+  _badreq=$($NBPKG query -F "$_pkg" '%B' 2>/dev/null | grep -E '^lib(gbm|X11|Xext|drm)\.so' || true)
+  [ -z "$_badreq" ] || { echo "ERROR: $1 requires $_badreq; it belongs in shlibs_required_ignore" >&2; exit 1; }
+  echo "=== guard OK: $1 requires no Mesa, X or LLVM ==="
+  echo "    shlibs_required: $($NBPKG query -F "$_pkg" '%B' | sort | tr '\n' ' ')"
+  echo "    shlibs_provided: $($NBPKG query -F "$_pkg" '%b' | sort | tr '\n' ' ')"
+}
+
 # --- 3. NextBSD-kernel-extensions (every kext artifact this arch has) ---
 # Glob rather than a fixed name list: the graphics asset is per-arch
 # (graphics-kexts-${ARCH}.tar.gz, nextbsd-kernel-extensions#36) while the
-# amd64-only ones (intelwifi/intelethernet/nvidia) stay arch-less, and the
+# amd64-only ones (intelwifi/intelethernet) stay arch-less, and the
 # workflow above only ever puts THIS arch's tarballs in art/. A new kext
 # artifact upstream is then packaged with no change here.
 HAVE_KEXTS=0
@@ -160,9 +213,40 @@ for t in art/*kext*.tar.gz; do
   tar -C stage/kexts/System/Library/Extensions -xzf "$t"
 done
 if ls stage/kexts/System/Library/Extensions/*.kext >/dev/null 2>&1; then
+  check_kext_build_ids stage/kexts/System/Library/Extensions
   # Tarballs carry their build-runner uid; OSKext requires root:wheel + go-w.
   chown -R 0:0 stage/kexts
   find stage/kexts/System/Library/Extensions -maxdepth 1 \( -name '*.kext' -o -name '*.bundle' \) -exec chmod -R go-w {} +
+  echo "=== staged kexts ==="; ls -1 stage/kexts/System/Library/Extensions
+  # Comment is arch-accurate: arm64 carries no Intel NIC/WiFi kexts, so naming
+  # them unconditionally would advertise parts that aren't there. NVIDIA is its
+  # own package now (section 3b).
+  case "$ARCH" in
+    amd64) KXCOMMENT="NextBSD kernel extensions (IntelEthernet, IntelWiFi, drm graphics + virtio-gpu kexts/firmware)" ;;
+    *)     KXCOMMENT="NextBSD kernel extensions (drm graphics core + virtio-gpu kexts)" ;;
+  esac
+  mkpkg NextBSD-kernel-extensions stage/kexts "$KXCOMMENT" "$(dep NextBSD-kernel)"
+  no_mesa_x_llvm NextBSD-kernel-extensions
+  HAVE_KEXTS=1
+else
+  echo "=== no kexts for ${ARCH} (arch-specific kexts not built) — skipping NextBSD-kernel-extensions ==="
+fi
+
+# --- 3b. NextBSD-kernel-extensions-nvidia (amd64; nextbsd-kernel-extensions-nvidia) ---
+# NVIDIA's proprietary driver lives in its own repo and package (E21 D3, pkg#22):
+# the chained NVIDIACore595 / NVIDIAModeset595 / NVIDIAGraphics595 kexts and the
+# NVIDIA595.bundle userland. NVIDIAGraphics595 links IOGraphics.kext
+# (OSBundleLibraries), which NextBSD-kernel-extensions ships, hence the dep. Its
+# files used to be in NextBSD-kernel-extensions; NextBSD-everything depends on
+# both at the same snapshot version, so an upgrade moves them in one transaction.
+HAVE_NVIDIA=0
+if [ -f art/nvidia/nvidia-kexts-amd64.tar.gz ]; then
+  [ "$HAVE_KEXTS" = 1 ] || { echo "ERROR: NVIDIA kexts but no NextBSD-kernel-extensions (IOGraphics) to depend on" >&2; exit 1; }
+  mkdir -p stage/nvidia/System/Library/Extensions
+  tar -C stage/nvidia/System/Library/Extensions -xzf art/nvidia/nvidia-kexts-amd64.tar.gz
+  check_kext_build_ids stage/nvidia/System/Library/Extensions
+  chown -R 0:0 stage/nvidia
+  find stage/nvidia/System/Library/Extensions -maxdepth 1 \( -name '*.kext' -o -name '*.bundle' \) -exec chmod -R go-w {} +
   # NVIDIA userland bundles (NVIDIA<NNN>.bundle) are version-locked storage for the
   # X11/GL/EGL/GBM driver half. Activate each by symlinking it into the paths X,
   # rtld, GLVND and Mesa's GBM loader search (/usr/X11, E23 D15; bundles built
@@ -171,18 +255,12 @@ if ls stage/kexts/System/Library/Extensions/*.kext >/dev/null 2>&1; then
   # /System location, so they are in place whatever is installed later and in
   # whatever order; nothing runs at install or boot. The activator ships inside
   # the bundle.
-  for b in stage/kexts/System/Library/Extensions/*.bundle; do
+  for b in stage/nvidia/System/Library/Extensions/*.bundle; do
     [ -d "$b" ] || continue
     act="$b/Contents/Resources/nvidia-activate.sh"
-    [ -f "$act" ] && sh "$act" "/System/Library/Extensions/$(basename "$b")" stage/kexts
+    [ -f "$act" ] && sh "$act" "/System/Library/Extensions/$(basename "$b")" stage/nvidia
   done
-  echo "=== staged kexts + userland ==="; ls -1 stage/kexts/System/Library/Extensions
-  # Comment is arch-accurate: arm64 carries neither the Intel NIC/WiFi kexts nor
-  # NVIDIA, so naming them unconditionally would advertise parts that aren't there.
-  case "$ARCH" in
-    amd64) KXCOMMENT="NextBSD kernel extensions (IntelEthernet, IntelWiFi, drm graphics + virtio-gpu + NVIDIAGraphics kexts/firmware + NVIDIA userland bundle)" ;;
-    *)     KXCOMMENT="NextBSD kernel extensions (drm graphics core + virtio-gpu kexts)" ;;
-  esac
+  echo "=== staged NVIDIA kexts + userland ==="; ls -1 stage/nvidia/System/Library/Extensions
   # The NVIDIA userland bundle's GLX and GBM libraries link libX11, libXext,
   # libdrm and libgbm. Those come from NextBSD-xlibs, -displayserver-support
   # and -mesa, and pkg would pull them in through shlibs_required, putting X
@@ -193,26 +271,15 @@ if ls stage/kexts/System/Library/Extensions/*.kext >/dev/null 2>&1; then
   # provided; the bundle now leaves it to NextBSD-mesa
   # (nextbsd-kernel-extensions-nvidia#2).
   KXIGNORE='shlibs_required_ignore: [ "libX11.so.6", "libXext.so.6", "libdrm.so.2", "libgbm.so.1" ]'
-  mkpkg NextBSD-kernel-extensions stage/kexts "$KXCOMMENT" "$(dep NextBSD-kernel)
+  mkpkg NextBSD-kernel-extensions-nvidia stage/nvidia \
+    "NextBSD NVIDIA kernel extensions (NVIDIAGraphics595 + modeset/core kexts, GSP firmware, NVIDIA595 userland bundle)" \
+    "$(dep NextBSD-kernel-extensions)
 ${KXIGNORE}"
-  # Guard: NextBSD-kernel-extensions MUST stay free of Mesa, X and LLVM. pkg
-  # resolves shlibs_required against every package's shlibs_provided, so a
-  # libgbm.so.1 (or libX11/libXext/libdrm) left in shlibs_required would make
-  # `pkg install NextBSD-everything` pull NextBSD-mesa (or X) in. Fail the build
-  # instead of shipping that.
-  kxpkg=$(ls out/repo/NextBSD-kernel-extensions-*.pkg 2>/dev/null | head -1)
-  if [ -n "$kxpkg" ]; then
-    baddep=$($NBPKG query -F "$kxpkg" '%dn' 2>/dev/null | grep -iE 'mesa|llvm|gallium|xlib' || true)
-    [ -z "$baddep" ] || { echo "ERROR: NextBSD-kernel-extensions gained a forbidden dependency: $baddep" >&2; exit 1; }
-    badreq=$($NBPKG query -F "$kxpkg" '%B' 2>/dev/null | grep -E '^lib(gbm|X11|Xext|drm)\.so' || true)
-    [ -z "$badreq" ] || { echo "ERROR: NextBSD-kernel-extensions requires $badreq; it belongs in shlibs_required_ignore" >&2; exit 1; }
-    echo "=== guard OK: NextBSD-kernel-extensions requires no Mesa, X or LLVM ==="
-    echo "    shlibs_required: $($NBPKG query -F "$kxpkg" '%B' | sort | tr '\n' ' ')"
-    echo "    shlibs_provided: $($NBPKG query -F "$kxpkg" '%b' | sort | tr '\n' ' ')"
-  fi
-  HAVE_KEXTS=1
-else
-  echo "=== no kexts for ${ARCH} (arch-specific kexts not built) — skipping NextBSD-kernel-extensions ==="
+  no_mesa_x_llvm NextBSD-kernel-extensions-nvidia
+  HAVE_NVIDIA=1
+elif [ "$ARCH" = amd64 ]; then
+  echo "ERROR: amd64 but no nvidia-kexts-amd64.tar.gz from nextbsd-kernel-extensions-nvidia" >&2
+  exit 1
 fi
 
 # --- 4. NextBSD-userland (Darwin Tier 0-2 runtime + daemons) ---
@@ -355,7 +422,7 @@ mkdir -p stage/everything
   echo "name: NextBSD-everything"
   echo "origin: nextbsd/NextBSD-everything"
   echo "version: \"${VER}\""
-  echo "comment: \"NextBSD-everything meta-package (base + kernel + userland + contrib + pkg$([ "$HAVE_KEXTS" = 1 ] && echo ' + kernel-extensions'))\""
+  echo "comment: \"NextBSD-everything meta-package (base + kernel + userland + contrib + pkg$([ "$HAVE_KEXTS" = 1 ] && echo ' + kernel-extensions')$([ "$HAVE_NVIDIA" = 1 ] && echo ' + NVIDIA'))\""
   echo "desc: \"Installs the complete NextBSD ${ARCH} OS snapshot ${VER}.\""
   echo "maintainer: \"dev@nextbsd.org\""
   echo "www: \"https://nextbsd.org\""
@@ -370,6 +437,7 @@ mkdir -p stage/everything
   echo "  NextBSD-contrib: { origin: \"nextbsd/NextBSD-contrib\", version: \"${VER}\" }"
   echo "  pkg: { origin: \"nextbsd/pkg\", version: \"${PKGVER}\" }"
   [ "$HAVE_KEXTS" = 1 ] && echo "  NextBSD-kernel-extensions: { origin: \"nextbsd/NextBSD-kernel-extensions\", version: \"${VER}\" }"
+  [ "$HAVE_NVIDIA" = 1 ] && echo "  NextBSD-kernel-extensions-nvidia: { origin: \"nextbsd/NextBSD-kernel-extensions-nvidia\", version: \"${VER}\" }"
   echo "}"
 } > /tmp/+MANIFEST
 : > /tmp/plist

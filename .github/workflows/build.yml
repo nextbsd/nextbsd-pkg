@@ -25,6 +25,9 @@ name: Build NextBSD packages
 # differ (arm64 has no Intel/AMD/Radeon/NVIDIA/Bochs/VBox parts, and ships the
 # drm core + the virtio-gpu trio instead), so the graphics asset is per-arch;
 # build.sh still skips the package entirely when an arch has no kexts at all.
+# amd64 also ships NextBSD-kernel-extensions-nvidia, from its own repo.
+# Every kext must carry the packaged kernel's KERNEL-BUILD-ID, or the whole run
+# fails before anything is packaged into the repo (pkg#12).
 
 on:
   workflow_dispatch:
@@ -95,18 +98,17 @@ jobs:
           gh release download continuous -R nextbsd/nextbsd-kernel-extensions \
             --pattern "graphics-kexts-${ARCH}.tar.gz" --dir art --clobber || true
           if [ "$ARCH" = amd64 ]; then
-            # IntelWiFi / IntelEthernet / NVIDIA are genuinely amd64-only builds
-            # and keep their arch-less asset names.
+            # IntelWiFi / IntelEthernet are genuinely amd64-only builds and keep
+            # their arch-less asset names.
             gh release download continuous -R nextbsd/nextbsd-kernel-extensions \
               --pattern 'intelwifi-kext.tar.gz' \
-              --pattern 'intelethernet-kext.tar.gz' \
-              --pattern 'nvidia-kexts.tar.gz' --dir art --clobber || true
-            # TRANSITIONAL: the pre-#36 arch-less graphics asset, so this repo
-            # cannot regress amd64 by merging ahead of kernel-modules#36. Drop
-            # this once that asset is pruned from the continuous release.
-            [ -f art/graphics-kexts-amd64.tar.gz ] || \
-              gh release download continuous -R nextbsd/nextbsd-kernel-extensions \
-                --pattern 'graphics-kexts.tar.gz' --dir art --clobber || true
+              --pattern 'intelethernet-kext.tar.gz' --dir art --clobber || true
+            # NVIDIA comes from its own repo (E21 D3, nextbsd/nextbsd#547) and is
+            # packaged on its own as NextBSD-kernel-extensions-nvidia (pkg#22).
+            # It lands in art/nvidia/, out of build.sh's art/*kext*.tar.gz glob,
+            # so it isn't also packaged into NextBSD-kernel-extensions.
+            gh release download continuous -R nextbsd/nextbsd-kernel-extensions-nvidia \
+              --pattern 'nvidia-kexts-amd64.tar.gz' --dir art/nvidia --clobber
           fi
           ls -lh art/
 
