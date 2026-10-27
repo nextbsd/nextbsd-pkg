@@ -58,8 +58,11 @@ echo "=== assert the install is COMPLETE (no package silently dropped) ==="
 #    registered. The failure mode was a green install that excluded a package;
 #    exit code alone would not catch it, `pkg info -e` per dep does.
 deps="NextBSD-freebsd-compat NextBSD-kernel NextBSD-userland NextBSD-contrib pkg"
-if [ "$ARCH" = amd64 ] && ls "$REPO"/NextBSD-kernel-extensions-*.pkg >/dev/null 2>&1; then
-  deps="$deps NextBSD-kernel-extensions"
+if ls "$REPO"/NextBSD-kernel-extensions-graphics-*.pkg >/dev/null 2>&1; then
+  deps="$deps NextBSD-kernel-extensions-graphics NextBSD-kernel-extensions"
+fi
+if [ "$ARCH" = amd64 ]; then
+  deps="$deps NextBSD-kernel-extensions-nvidia"
 fi
 for p in $deps; do
   $PKG info -e "$p" || { echo "FAIL: $p not installed by NextBSD-everything (SAT solver dropped it — file conflict?)" >&2; exit 1; }

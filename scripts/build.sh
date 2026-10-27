@@ -5,7 +5,7 @@
 #
 # Arch-aware: both arches get every package. The kext SETS differ (arm64
 # ships the drm core + virtio-gpu trio; amd64 adds Intel/AMD/Radeon/
-# Bochs/VBox, plus NVIDIA as its own package), so kernel-extensions is built from whatever kext tarballs the
+# Bochs/VBox, plus NVIDIA as its own package), so kernel-extensions-graphics is built from whatever kext tarballs the
 # workflow fetched for this arch — and skipped entirely if there are none. The
 # packaging itself is cross-arch on the x86 VM — pkg create just tars
 # already-built ELF with the ${ABI} label; it doesn't compile.
@@ -156,7 +156,7 @@ echo "kernel KERNEL-BUILD-ID: ${KERNEL_BUILD_ID}"
 # check_kext_build_ids <Extensions dir>: refuse to package any kext not built for
 # this kernel (pkg#12). Each kext records the kernel build it was compiled for as
 # NBSDKernelBuildID in its Info.plist. A mismatched kernel + kext pair boots, then
-# panics in an unrelated driver (nextbsd-kernel-extensions#46), so the whole run
+# panics in an unrelated driver (nextbsd-kernel-extensions-graphics#46), so the whole run
 # fails rather than publish it. Same comparison as nextbsd-ci's assemble-image.sh.
 check_kext_build_ids() {
   _bad=0; _n=0
@@ -175,7 +175,7 @@ check_kext_build_ids() {
   done
   if [ "$_bad" -ne 0 ]; then
     echo "ERROR: $_bad of $_n kexts were not built for kernel ${KERNEL_BUILD_ID}; refusing to package." >&2
-    echo "       Rebuild the kexts against the current kernel first (nextbsd-kernel-extensions," >&2
+    echo "       Rebuild the kexts against the current kernel first (nextbsd-kernel-extensions-graphics," >&2
     echo "       then nextbsd-kernel-extensions-nvidia), then rerun this workflow." >&2
     exit 1
   fi
@@ -199,9 +199,11 @@ no_mesa_x_llvm() {
   echo "    shlibs_provided: $($NBPKG query -F "$_pkg" '%b' | sort | tr '\n' ' ')"
 }
 
-# --- 3. NextBSD-kernel-extensions (every kext artifact this arch has) ---
+# --- 3. NextBSD-kernel-extensions-graphics (every kext artifact this arch has) ---
+# Built from nextbsd-kernel-extensions-graphics, which was nextbsd-kernel-extensions
+# (nextbsd/nextbsd#551); the package was NextBSD-kernel-extensions (pkg#23).
 # Glob rather than a fixed name list: the graphics asset is per-arch
-# (graphics-kexts-${ARCH}.tar.gz, nextbsd-kernel-extensions#36) while the
+# (graphics-kexts-${ARCH}.tar.gz, nextbsd-kernel-extensions-graphics#36) while the
 # amd64-only ones (intelwifi/intelethernet) stay arch-less, and the
 # workflow above only ever puts THIS arch's tarballs in art/. A new kext
 # artifact upstream is then packaged with no change here.
@@ -222,26 +224,42 @@ if ls stage/kexts/System/Library/Extensions/*.kext >/dev/null 2>&1; then
   # them unconditionally would advertise parts that aren't there. NVIDIA is its
   # own package now (section 3b).
   case "$ARCH" in
-    amd64) KXCOMMENT="NextBSD kernel extensions (IntelEthernet, IntelWiFi, drm graphics + virtio-gpu kexts/firmware)" ;;
-    *)     KXCOMMENT="NextBSD kernel extensions (drm graphics core + virtio-gpu kexts)" ;;
+    amd64) KXCOMMENT="NextBSD graphics kernel extensions (drm graphics + virtio-gpu kexts/firmware; IntelEthernet, IntelWiFi for now)" ;;
+    *)     KXCOMMENT="NextBSD graphics kernel extensions (drm graphics core + virtio-gpu kexts)" ;;
   esac
-  mkpkg NextBSD-kernel-extensions stage/kexts "$KXCOMMENT" "$(dep NextBSD-kernel)"
-  no_mesa_x_llvm NextBSD-kernel-extensions
+  mkpkg NextBSD-kernel-extensions-graphics stage/kexts "$KXCOMMENT" "$(dep NextBSD-kernel)"
+  no_mesa_x_llvm NextBSD-kernel-extensions-graphics
   HAVE_KEXTS=1
 else
-  echo "=== no kexts for ${ARCH} (arch-specific kexts not built) — skipping NextBSD-kernel-extensions ==="
+  echo "=== no kexts for ${ARCH} (arch-specific kexts not built) — skipping NextBSD-kernel-extensions-graphics ==="
+fi
+
+# --- 3a. NextBSD-kernel-extensions (empty for now) ---
+# pkg matches upgrades by name, so an installed NextBSD-kernel-extensions (which
+# held the graphics kexts until pkg#23) must have a newer version to upgrade to,
+# or it would stay installed and conflict with -graphics over every file. This
+# empty package at the snapshot version is that upgrade: it gives the files up
+# in the same transaction that installs -graphics, like the NVIDIA split. It
+# depends on -graphics so an install of it alone keeps its graphics kexts.
+# The name gets its real contents, the FreeBSD kexts, in pkg#24.
+if [ "$HAVE_KEXTS" = 1 ]; then
+  mkdir -p stage/kexts-empty
+  mkpkg NextBSD-kernel-extensions stage/kexts-empty \
+    "NextBSD kernel extensions (empty; the graphics kexts moved to NextBSD-kernel-extensions-graphics)" \
+    "$(dep NextBSD-kernel-extensions-graphics)"
 fi
 
 # --- 3b. NextBSD-kernel-extensions-nvidia (amd64; nextbsd-kernel-extensions-nvidia) ---
 # NVIDIA's proprietary driver lives in its own repo and package (E21 D3, pkg#22):
 # the chained NVIDIACore595 / NVIDIAModeset595 / NVIDIAGraphics595 kexts and the
 # NVIDIA595.bundle userland. NVIDIAGraphics595 links IOGraphics.kext
-# (OSBundleLibraries), which NextBSD-kernel-extensions ships, hence the dep. Its
-# files used to be in NextBSD-kernel-extensions; NextBSD-everything depends on
-# both at the same snapshot version, so an upgrade moves them in one transaction.
+# (OSBundleLibraries), which NextBSD-kernel-extensions-graphics ships, hence the
+# dep. Its files used to be in NextBSD-kernel-extensions; NextBSD-everything
+# depends on both at the same snapshot version, so an upgrade moves them in one
+# transaction.
 HAVE_NVIDIA=0
 if [ -f art/nvidia/nvidia-kexts-amd64.tar.gz ]; then
-  [ "$HAVE_KEXTS" = 1 ] || { echo "ERROR: NVIDIA kexts but no NextBSD-kernel-extensions (IOGraphics) to depend on" >&2; exit 1; }
+  [ "$HAVE_KEXTS" = 1 ] || { echo "ERROR: NVIDIA kexts but no NextBSD-kernel-extensions-graphics (IOGraphics) to depend on" >&2; exit 1; }
   mkdir -p stage/nvidia/System/Library/Extensions
   tar -C stage/nvidia/System/Library/Extensions -xzf art/nvidia/nvidia-kexts-amd64.tar.gz
   check_kext_build_ids stage/nvidia/System/Library/Extensions
@@ -273,7 +291,7 @@ if [ -f art/nvidia/nvidia-kexts-amd64.tar.gz ]; then
   KXIGNORE='shlibs_required_ignore: [ "libX11.so.6", "libXext.so.6", "libdrm.so.2", "libgbm.so.1" ]'
   mkpkg NextBSD-kernel-extensions-nvidia stage/nvidia \
     "NextBSD NVIDIA kernel extensions (NVIDIAGraphics595 + modeset/core kexts, GSP firmware, NVIDIA595 userland bundle)" \
-    "$(dep NextBSD-kernel-extensions)
+    "$(dep NextBSD-kernel-extensions-graphics)
 ${KXIGNORE}"
   no_mesa_x_llvm NextBSD-kernel-extensions-nvidia
   HAVE_NVIDIA=1
@@ -422,7 +440,7 @@ mkdir -p stage/everything
   echo "name: NextBSD-everything"
   echo "origin: nextbsd/NextBSD-everything"
   echo "version: \"${VER}\""
-  echo "comment: \"NextBSD-everything meta-package (base + kernel + userland + contrib + pkg$([ "$HAVE_KEXTS" = 1 ] && echo ' + kernel-extensions')$([ "$HAVE_NVIDIA" = 1 ] && echo ' + NVIDIA'))\""
+  echo "comment: \"NextBSD-everything meta-package (base + kernel + userland + contrib + pkg$([ "$HAVE_KEXTS" = 1 ] && echo ' + kernel-extensions-graphics')$([ "$HAVE_NVIDIA" = 1 ] && echo ' + NVIDIA'))\""
   echo "desc: \"Installs the complete NextBSD ${ARCH} OS snapshot ${VER}.\""
   echo "maintainer: \"dev@nextbsd.org\""
   echo "www: \"https://nextbsd.org\""
@@ -436,6 +454,7 @@ mkdir -p stage/everything
   echo "  NextBSD-userland: { origin: \"nextbsd/NextBSD-userland\", version: \"${VER}\" }"
   echo "  NextBSD-contrib: { origin: \"nextbsd/NextBSD-contrib\", version: \"${VER}\" }"
   echo "  pkg: { origin: \"nextbsd/pkg\", version: \"${PKGVER}\" }"
+  [ "$HAVE_KEXTS" = 1 ] && echo "  NextBSD-kernel-extensions-graphics: { origin: \"nextbsd/NextBSD-kernel-extensions-graphics\", version: \"${VER}\" }"
   [ "$HAVE_KEXTS" = 1 ] && echo "  NextBSD-kernel-extensions: { origin: \"nextbsd/NextBSD-kernel-extensions\", version: \"${VER}\" }"
   [ "$HAVE_NVIDIA" = 1 ] && echo "  NextBSD-kernel-extensions-nvidia: { origin: \"nextbsd/NextBSD-kernel-extensions-nvidia\", version: \"${VER}\" }"
   echo "}"
