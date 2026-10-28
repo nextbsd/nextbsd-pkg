@@ -57,9 +57,9 @@ echo "=== assert the install is COMPLETE (no package silently dropped) ==="
 # 2. The general form: every NextBSD-everything dependency must actually be
 #    registered. The failure mode was a green install that excluded a package;
 #    exit code alone would not catch it, `pkg info -e` per dep does.
-deps="NextBSD-freebsd-compat NextBSD-kernel NextBSD-userland NextBSD-contrib pkg"
+deps="NextBSD-freebsd-compat NextBSD-kernel NextBSD-userland NextBSD-contrib NextBSD-kernel-extensions pkg"
 if ls "$REPO"/NextBSD-kernel-extensions-graphics-*.pkg >/dev/null 2>&1; then
-  deps="$deps NextBSD-kernel-extensions-graphics NextBSD-kernel-extensions"
+  deps="$deps NextBSD-kernel-extensions-graphics"
 fi
 if [ "$ARCH" = amd64 ]; then
   deps="$deps NextBSD-kernel-extensions-nvidia"

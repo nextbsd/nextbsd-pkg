@@ -9,7 +9,8 @@ GitHub Release tags (`continuous-amd64` / `continuous-arm64`).
 ```
 nextbsd-freebsd-compat ────┐
 nextbsd-kernel ────────────┤  continuous artifacts
-nextbsd-kernel-extensions-graphics ─┤  (raw .tar.gz, per arch)
+nextbsd-kernel-extensions ─┤  (raw .tar.gz, per arch)
+nextbsd-kernel-extensions-graphics ─┤
 nextbsd-kernel-extensions-nvidia ─┤  (amd64)
 nextbsd-userland ──────────┤
 nextbsd-contrib ───────────┤
@@ -70,7 +71,7 @@ Then install the whole OS via the meta-package (and upgrade as CI republishes):
 
 ```sh
 pkg update
-pkg install NextBSD-everything      # base + kernel + userland + contrib + kernel-extensions-graphics (+ NVIDIA on amd64) + pkg
+pkg install NextBSD-everything      # base + kernel + userland + contrib + kernel-extensions (+ -graphics, + NVIDIA on amd64) + pkg
 pkg upgrade                    # rolling: picks up each new snapshot
 ```
 
@@ -80,8 +81,8 @@ pkg upgrade                    # rolling: picks up each new snapshot
 |---|:--:|:--:|---|---|:--:|
 | `NextBSD-freebsd-compat` | ✓ | ✓ | nextbsd-freebsd-compat (base: libc, PAM, commands) | — | ✓ |
 | `NextBSD-kernel` | ✓ | ✓ | nextbsd-kernel (kernel binary) | — | ✓ |
-| `NextBSD-kernel-extensions-graphics` | ✓ | ✓ | nextbsd-kernel-extensions-graphics (drm graphics kexts per arch, plus IntelWiFi and IntelEthernet on amd64 for now) | kernel | ✓ |
-| `NextBSD-kernel-extensions` | ✓ | ✓ | — (empty for now; it held the graphics kexts until pkg#23 and is how an upgrade hands them to `-graphics`. The FreeBSD kexts arrive in it with pkg#24) | kernel-extensions-graphics | ✓ |
+| `NextBSD-kernel-extensions` | ✓ | ✓ | nextbsd-kernel-extensions (the FreeBSD-derived kexts: IntelWiFi with its firmware and IntelEthernet on amd64; none on arm64 yet, where it is empty) | kernel | ✓ |
+| `NextBSD-kernel-extensions-graphics` | ✓ | ✓ | nextbsd-kernel-extensions-graphics (drm graphics kexts per arch) | kernel | ✓ |
 | `NextBSD-kernel-extensions-nvidia` | ✓ | — | nextbsd-kernel-extensions-nvidia (NVIDIAGraphics595 + modeset/core kexts, GSP firmware, the NVIDIA595 userland bundle) | kernel-extensions-graphics | ✓ |
 | `NextBSD-userland` | ✓ | ✓ | nextbsd-userland (Darwin Mach runtime + daemons) | compat, kernel | ✓ |
 | `NextBSD-contrib` | ✓ | ✓ | nextbsd-contrib (third-party base programs: sudo, zsh, pico) | compat | ✓ |
@@ -123,7 +124,7 @@ it by name. No meta-package pulls them in (maintainer decision,
 (`NBSDKernelBuildID` in its Info.plist, nextbsd-kernel#326), and the kernel artifact carries its
 own `KERNEL-BUILD-ID`. If any kext differs, the whole run fails before anything is packaged:
 a mismatched pair boots and then panics in an unrelated driver. Rebuild the kexts against the
-current kernel (nextbsd-kernel-extensions-graphics, then nextbsd-kernel-extensions-nvidia) and rerun.
+current kernel (nextbsd-kernel-extensions and nextbsd-kernel-extensions-graphics, then nextbsd-kernel-extensions-nvidia) and rerun.
 
 The NVIDIA userland bundle in `NextBSD-kernel-extensions-nvidia` links libX11, libXext, libdrm
 and libgbm. Its package lists them as `shlibs_required_ignore`, so pkg doesn't pull X or
