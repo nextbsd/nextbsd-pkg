@@ -81,7 +81,7 @@ pkg upgrade                    # rolling: picks up each new snapshot
 |---|:--:|:--:|---|---|:--:|
 | `NextBSD-freebsd-compat` | ✓ | ✓ | nextbsd-freebsd-compat (base: libc, PAM, commands) | — | ✓ |
 | `NextBSD-kernel` | ✓ | ✓ | nextbsd-kernel (kernel binary) | — | ✓ |
-| `NextBSD-kernel-extensions` | ✓ | ✓ | nextbsd-kernel-extensions (the FreeBSD-derived kexts: IntelWiFi with its firmware and IntelEthernet on amd64; none on arm64 yet, where it is empty) | kernel | ✓ |
+| `NextBSD-kernel-extensions` | ✓ | ✓ | nextbsd-kernel-extensions (the FreeBSD-derived kexts, about 230 per arch: NICs such as IntelEM and RealtekRE, the Wlan family, IntelIwlwifi with its firmware (amd64), filesystems, netgraph, USB and HID drivers, ...; each loads when its hardware appears or on request) | kernel | ✓ |
 | `NextBSD-kernel-extensions-graphics` | ✓ | ✓ | nextbsd-kernel-extensions-graphics (drm graphics kexts per arch) | kernel | ✓ |
 | `NextBSD-kernel-extensions-nvidia` | ✓ | — | nextbsd-kernel-extensions-nvidia (NVIDIAGraphics595 + modeset/core kexts, GSP firmware, the NVIDIA595 userland bundle) | kernel-extensions-graphics | ✓ |
 | `NextBSD-userland` | ✓ | ✓ | nextbsd-userland (Darwin Mach runtime + daemons) | compat, kernel | ✓ |
