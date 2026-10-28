@@ -19,8 +19,8 @@ name: Build NextBSD packages
 # pull_request builds the packages but never publishes, so the packaging itself
 # is still exercised on every change here.
 #
-# Both arches ship base + kernel + userland + contrib + kernel-extensions-graphics
-# (and the empty kernel-extensions that upgrades hand it over with), plus the
+# Both arches ship base + kernel + userland + contrib + kernel-extensions (the
+# FreeBSD kexts; empty on arm64 for now) + kernel-extensions-graphics, plus the
 # display server stack (displayserver-support, xlibs, mesa, xlibre) and the E24
 # packages (gnustep-, printing-support, toolchain). The kext sets
 # differ (arm64 has no Intel/AMD/Radeon/NVIDIA/Bochs/VBox parts, and ships the
@@ -101,11 +101,12 @@ jobs:
           gh release download continuous -R nextbsd/nextbsd-kernel-extensions-graphics \
             --pattern "graphics-kexts-${ARCH}.tar.gz" --dir art --clobber
           if [ "$ARCH" = amd64 ]; then
-            # IntelWiFi / IntelEthernet are genuinely amd64-only builds and keep
-            # their arch-less asset names.
-            gh release download continuous -R nextbsd/nextbsd-kernel-extensions-graphics \
-              --pattern 'intelwifi-kext.tar.gz' \
-              --pattern 'intelethernet-kext.tar.gz' --dir art --clobber
+            # The FreeBSD kexts (IntelWiFi, IntelEthernet) come from the new
+            # nextbsd-kernel-extensions (nextbsd/nextbsd#554) and are packaged as
+            # NextBSD-kernel-extensions (pkg#24). amd64 only for now. Like NVIDIA,
+            # they land in their own directory, out of the graphics glob.
+            gh release download continuous -R nextbsd/nextbsd-kernel-extensions \
+              --pattern 'freebsd-kexts-amd64.tar.gz' --dir art/freebsd --clobber
             # NVIDIA comes from its own repo (E21 D3, nextbsd/nextbsd#547) and is
             # packaged on its own as NextBSD-kernel-extensions-nvidia (pkg#22).
             # It lands in art/nvidia/, out of build.sh's art/*kext*.tar.gz glob,

@@ -203,10 +203,9 @@ no_mesa_x_llvm() {
 # Built from nextbsd-kernel-extensions-graphics, which was nextbsd-kernel-extensions
 # (nextbsd/nextbsd#551); the package was NextBSD-kernel-extensions (pkg#23).
 # Glob rather than a fixed name list: the graphics asset is per-arch
-# (graphics-kexts-${ARCH}.tar.gz, nextbsd-kernel-extensions-graphics#36) while the
-# amd64-only ones (intelwifi/intelethernet) stay arch-less, and the
-# workflow above only ever puts THIS arch's tarballs in art/. A new kext
-# artifact upstream is then packaged with no change here.
+# (graphics-kexts-${ARCH}.tar.gz, nextbsd-kernel-extensions-graphics#36), and the
+# workflow above only ever puts THIS arch's tarballs in art/. The FreeBSD and
+# NVIDIA kexts land in art/freebsd/ and art/nvidia/, outside this glob.
 HAVE_KEXTS=0
 mkdir -p stage/kexts/System/Library/Extensions
 for t in art/*kext*.tar.gz; do
@@ -220,11 +219,11 @@ if ls stage/kexts/System/Library/Extensions/*.kext >/dev/null 2>&1; then
   chown -R 0:0 stage/kexts
   find stage/kexts/System/Library/Extensions -maxdepth 1 \( -name '*.kext' -o -name '*.bundle' \) -exec chmod -R go-w {} +
   echo "=== staged kexts ==="; ls -1 stage/kexts/System/Library/Extensions
-  # Comment is arch-accurate: arm64 carries no Intel NIC/WiFi kexts, so naming
-  # them unconditionally would advertise parts that aren't there. NVIDIA is its
-  # own package now (section 3b).
+  # Comment is arch-accurate: arm64 carries only the drm core + virtio-gpu.
+  # The Intel NIC/WiFi kexts are in NextBSD-kernel-extensions (3a) and NVIDIA in
+  # its own package (3b).
   case "$ARCH" in
-    amd64) KXCOMMENT="NextBSD graphics kernel extensions (drm graphics + virtio-gpu kexts/firmware; IntelEthernet, IntelWiFi for now)" ;;
+    amd64) KXCOMMENT="NextBSD graphics kernel extensions (drm graphics + virtio-gpu kexts/firmware)" ;;
     *)     KXCOMMENT="NextBSD graphics kernel extensions (drm graphics core + virtio-gpu kexts)" ;;
   esac
   mkpkg NextBSD-kernel-extensions-graphics stage/kexts "$KXCOMMENT" "$(dep NextBSD-kernel)"
@@ -234,20 +233,33 @@ else
   echo "=== no kexts for ${ARCH} (arch-specific kexts not built) — skipping NextBSD-kernel-extensions-graphics ==="
 fi
 
-# --- 3a. NextBSD-kernel-extensions (empty for now) ---
-# pkg matches upgrades by name, so an installed NextBSD-kernel-extensions (which
-# held the graphics kexts until pkg#23) must have a newer version to upgrade to,
-# or it would stay installed and conflict with -graphics over every file. This
-# empty package at the snapshot version is that upgrade: it gives the files up
-# in the same transaction that installs -graphics, like the NVIDIA split. It
-# depends on -graphics so an install of it alone keeps its graphics kexts.
-# The name gets its real contents, the FreeBSD kexts, in pkg#24.
-if [ "$HAVE_KEXTS" = 1 ]; then
-  mkdir -p stage/kexts-empty
-  mkpkg NextBSD-kernel-extensions stage/kexts-empty \
-    "NextBSD kernel extensions (empty; the graphics kexts moved to NextBSD-kernel-extensions-graphics)" \
-    "$(dep NextBSD-kernel-extensions-graphics)"
+# --- 3a. NextBSD-kernel-extensions (the FreeBSD kexts; nextbsd-kernel-extensions) ---
+# The FreeBSD-derived kexts from the new nextbsd-kernel-extensions (pkg#24,
+# nextbsd/nextbsd#554): today IntelWiFi (with its iwlwifi firmware) and
+# IntelEthernet, amd64 only. Until pkg#23 this name held the graphics kexts, and
+# until pkg#24 the Intel kexts were in -graphics; an upgrade moves those files in
+# one transaction, as both packages move to the same snapshot version.
+# arm64 has no FreeBSD kexts yet, so there the package is empty. It still ships,
+# so an older arm64 NextBSD-kernel-extensions (graphics, before pkg#23) has a
+# version to upgrade to instead of staying installed and conflicting with
+# -graphics over every file.
+mkdir -p stage/freebsd/System/Library/Extensions
+if [ -f "art/freebsd/freebsd-kexts-${ARCH}.tar.gz" ]; then
+  tar -C stage/freebsd/System/Library/Extensions -xzf "art/freebsd/freebsd-kexts-${ARCH}.tar.gz"
+  check_kext_build_ids stage/freebsd/System/Library/Extensions
+  chown -R 0:0 stage/freebsd
+  find stage/freebsd/System/Library/Extensions -maxdepth 1 -name '*.kext' -exec chmod -R go-w {} +
+  echo "=== staged FreeBSD kexts ==="; ls -1 stage/freebsd/System/Library/Extensions
+  FKCOMMENT="NextBSD kernel extensions (FreeBSD-derived kexts: $(cd stage/freebsd/System/Library/Extensions && ls -d *.kext | sed 's/\.kext$//' | paste -sd, - | sed 's/,/, /g'))"
+elif [ "$ARCH" = amd64 ]; then
+  echo "ERROR: amd64 but no freebsd-kexts-amd64.tar.gz from nextbsd-kernel-extensions" >&2
+  exit 1
+else
+  rm -rf stage/freebsd/System
+  FKCOMMENT="NextBSD kernel extensions (FreeBSD-derived kexts; none on ${ARCH} yet)"
 fi
+mkpkg NextBSD-kernel-extensions stage/freebsd "$FKCOMMENT" "$(dep NextBSD-kernel)"
+no_mesa_x_llvm NextBSD-kernel-extensions
 
 # --- 3b. NextBSD-kernel-extensions-nvidia (amd64; nextbsd-kernel-extensions-nvidia) ---
 # NVIDIA's proprietary driver lives in its own repo and package (E21 D3, pkg#22):
@@ -440,7 +452,7 @@ mkdir -p stage/everything
   echo "name: NextBSD-everything"
   echo "origin: nextbsd/NextBSD-everything"
   echo "version: \"${VER}\""
-  echo "comment: \"NextBSD-everything meta-package (base + kernel + userland + contrib + pkg$([ "$HAVE_KEXTS" = 1 ] && echo ' + kernel-extensions-graphics')$([ "$HAVE_NVIDIA" = 1 ] && echo ' + NVIDIA'))\""
+  echo "comment: \"NextBSD-everything meta-package (base + kernel + userland + contrib + kernel-extensions + pkg$([ "$HAVE_KEXTS" = 1 ] && echo ' + kernel-extensions-graphics')$([ "$HAVE_NVIDIA" = 1 ] && echo ' + NVIDIA'))\""
   echo "desc: \"Installs the complete NextBSD ${ARCH} OS snapshot ${VER}.\""
   echo "maintainer: \"dev@nextbsd.org\""
   echo "www: \"https://nextbsd.org\""
@@ -455,7 +467,7 @@ mkdir -p stage/everything
   echo "  NextBSD-contrib: { origin: \"nextbsd/NextBSD-contrib\", version: \"${VER}\" }"
   echo "  pkg: { origin: \"nextbsd/pkg\", version: \"${PKGVER}\" }"
   [ "$HAVE_KEXTS" = 1 ] && echo "  NextBSD-kernel-extensions-graphics: { origin: \"nextbsd/NextBSD-kernel-extensions-graphics\", version: \"${VER}\" }"
-  [ "$HAVE_KEXTS" = 1 ] && echo "  NextBSD-kernel-extensions: { origin: \"nextbsd/NextBSD-kernel-extensions\", version: \"${VER}\" }"
+  echo "  NextBSD-kernel-extensions: { origin: \"nextbsd/NextBSD-kernel-extensions\", version: \"${VER}\" }"
   [ "$HAVE_NVIDIA" = 1 ] && echo "  NextBSD-kernel-extensions-nvidia: { origin: \"nextbsd/NextBSD-kernel-extensions-nvidia\", version: \"${VER}\" }"
   echo "}"
 } > /tmp/+MANIFEST
