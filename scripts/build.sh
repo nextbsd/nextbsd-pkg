@@ -235,14 +235,11 @@ fi
 
 # --- 3a. NextBSD-kernel-extensions (the FreeBSD kexts; nextbsd-kernel-extensions) ---
 # The FreeBSD-derived kexts from the new nextbsd-kernel-extensions (pkg#24,
-# nextbsd/nextbsd#554): today IntelWiFi (with its iwlwifi firmware) and
-# IntelEthernet, amd64 only. Until pkg#23 this name held the graphics kexts, and
-# until pkg#24 the Intel kexts were in -graphics; an upgrade moves those files in
-# one transaction, as both packages move to the same snapshot version.
-# arm64 has no FreeBSD kexts yet, so there the package is empty. It still ships,
-# so an older arm64 NextBSD-kernel-extensions (graphics, before pkg#23) has a
-# version to upgrade to instead of staying installed and conflicting with
-# -graphics over every file.
+# nextbsd/nextbsd#554), per arch: today IntelWiFi (with its iwlwifi firmware)
+# and autofs on amd64, autofs on arm64. Until pkg#23 this name held the
+# graphics kexts, and until pkg#24 the Intel kexts were in -graphics; an
+# upgrade moves those files in one transaction, as both packages move to the
+# same snapshot version.
 mkdir -p stage/freebsd/System/Library/Extensions
 if [ -f "art/freebsd/freebsd-kexts-${ARCH}.tar.gz" ]; then
   tar -C stage/freebsd/System/Library/Extensions -xzf "art/freebsd/freebsd-kexts-${ARCH}.tar.gz"
@@ -251,12 +248,9 @@ if [ -f "art/freebsd/freebsd-kexts-${ARCH}.tar.gz" ]; then
   find stage/freebsd/System/Library/Extensions -maxdepth 1 -name '*.kext' -exec chmod -R go-w {} +
   echo "=== staged FreeBSD kexts ==="; ls -1 stage/freebsd/System/Library/Extensions
   FKCOMMENT="NextBSD kernel extensions (FreeBSD-derived kexts: $(cd stage/freebsd/System/Library/Extensions && ls -d *.kext | sed 's/\.kext$//' | paste -sd, - | sed 's/,/, /g'))"
-elif [ "$ARCH" = amd64 ]; then
-  echo "ERROR: amd64 but no freebsd-kexts-amd64.tar.gz from nextbsd-kernel-extensions" >&2
-  exit 1
 else
-  rm -rf stage/freebsd/System
-  FKCOMMENT="NextBSD kernel extensions (FreeBSD-derived kexts; none on ${ARCH} yet)"
+  echo "ERROR: no freebsd-kexts-${ARCH}.tar.gz from nextbsd-kernel-extensions" >&2
+  exit 1
 fi
 mkpkg NextBSD-kernel-extensions stage/freebsd "$FKCOMMENT" "$(dep NextBSD-kernel)"
 no_mesa_x_llvm NextBSD-kernel-extensions
