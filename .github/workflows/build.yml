@@ -2,8 +2,10 @@ name: Build NextBSD packages
 
 # Assembles versioned pkg(8) packages from the component repos' `continuous`
 # artifacts and publishes a FLAT pkg repository to per-arch release tags
-# (continuous-amd64 / continuous-arm64). pkg(8) only runs on FreeBSD, so the
-# packaging happens inside a FreeBSD VM (vmactions); the Linux runner does the
+# (continuous-amd64 / continuous-arm64). Every package carries the NextBSD ABI
+# NextBSD:27:<arch> (nextbsd-kernel#376), stamped by NextBSD's own pkg-static
+# from nextbsd-contrib. It runs inside a FreeBSD VM (vmactions) until NextBSD
+# has its own CI guest (E26, nextbsd/nextbsd#587); the Linux runner does the
 # cross-repo downloads (public repos -> GITHUB_TOKEN) and the release upload.
 #
 # Trigger model (maintainer decision): PUBLISHING IS MANUAL. workflow_dispatch is
@@ -19,8 +21,8 @@ name: Build NextBSD packages
 # pull_request builds the packages but never publishes, so the packaging itself
 # is still exercised on every change here.
 #
-# Both arches ship base + kernel + userland + contrib + kernel-extensions (the
-# FreeBSD kexts) + kernel-extensions-graphics, plus the
+# Both arches ship base + kernel + userland + contrib + kernel-extensions (from
+# nextbsd-kernel-extensions) + kernel-extensions-graphics, plus the
 # display server stack (displayserver-support, xlibs, mesa, xlibre) and the E24
 # packages (gnustep-, printing-support, toolchain). The kext sets
 # differ (arm64 has no Intel/AMD/Radeon/NVIDIA/Bochs/VBox parts, and ships the
@@ -85,8 +87,10 @@ jobs:
             --pattern "nextbsd-mesa-x11-${ARCH}.tar.gz" --dir art --clobber
           # NextBSD's own pkg (pkg#19), built by nextbsd-contrib in its own
           # artifact: packaged as `pkg` for this arch, and the amd64 build's
-          # pkg-static (in art/tool/) is what build.sh runs on the amd64 VM
-          # for pkg create and pkg repo, whichever arch is being packaged.
+          # pkg-static (in art/tool/) is what build.sh and install-test.sh
+          # run on the amd64 VM for pkg create, pkg repo and the test
+          # install, whichever arch is being packaged. Only NextBSD's pkg
+          # knows the NextBSD ABI.
           gh release download continuous -R nextbsd/nextbsd-contrib \
             --pattern "nextbsd-contrib-pkg-${ARCH}.tar.gz" --dir art --clobber
           mkdir -p art/tool
@@ -100,9 +104,9 @@ jobs:
           # there: a missing one fails the run (nextbsd/nextbsd#552).
           gh release download continuous -R nextbsd/nextbsd-kernel-extensions-graphics \
             --pattern "graphics-kexts-${ARCH}.tar.gz" --dir art --clobber
-          # The FreeBSD kexts come from nextbsd-kernel-extensions
-          # (nextbsd/nextbsd#554), per arch, and are packaged as
-          # NextBSD-kernel-extensions (pkg#24). Like NVIDIA, they land in their
+          # The kexts nextbsd-kernel-extensions builds (asset
+          # freebsd-kexts-<arch>, nextbsd/nextbsd#554) come per arch and are
+          # packaged as NextBSD-kernel-extensions (pkg#24). Like NVIDIA, they land in their
           # own directory, out of the graphics glob.
           gh release download continuous -R nextbsd/nextbsd-kernel-extensions \
             --pattern "freebsd-kexts-${ARCH}.tar.gz" --dir art/freebsd --clobber
@@ -116,15 +120,12 @@ jobs:
           fi
           ls -lh art/
 
-      - name: Build packages + flat repo, then install-test (FreeBSD VM)
+      - name: Build packages + flat repo, then install-test (VM)
         uses: vmactions/freebsd-vm@v1
         with:
-          # FreeBSD 15.1 so the VM's native pkg ABI is FreeBSD:15 — matching the
-          # packages, which lets install-test.sh's `pkg -r ... update/install`
-          # accept the repo (a 14.x VM rejects FreeBSD:15 packages as "wrong
-          # architecture" even with ABI pinned). This is the same release the ISO
-          # builders (nextbsd/build.sh, gershwin-on-nextbsd) use. pkg create/repo
-          # in build.sh are version-agnostic, so packaging is unaffected.
+          # 15.1: NextBSD's pkg-static is built against the releng/15.1 base,
+          # so it runs on this release (a static binary needs a kernel at
+          # least as new as its libc). The VM's own pkg is not used.
           release: "15.1"
           usesh: true
           copyback: true
@@ -190,10 +191,22 @@ jobs:
         arch: [amd64, arm64]
     steps:
       - uses: actions/checkout@v4
-      - name: pkg update + resolve NextBSD-everything (FreeBSD VM)
+      # verify.sh resolves the published repo with NextBSD's pkg-static (the
+      # amd64 build, as the VM is amd64): only NextBSD's pkg knows the
+      # NextBSD ABI.
+      - name: Download NextBSD's pkg (nextbsd-contrib, public repo)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p art/tool
+          gh release download continuous -R nextbsd/nextbsd-contrib \
+            --pattern "nextbsd-contrib-pkg-amd64.tar.gz" --dir art/tool --clobber
+      - name: pkg update + resolve NextBSD-everything (VM)
         uses: vmactions/freebsd-vm@v1
         with:
-          release: "14.2"
+          # 15.1, as for the package job: NextBSD's pkg-static is built
+          # against the releng/15.1 base.
+          release: "15.1"
           usesh: true
           prepare: pkg bootstrap -y || true
           run: |

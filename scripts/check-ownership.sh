@@ -46,7 +46,7 @@ if [ -n "$conflicts" ]; then
   printf '%s\n' "$conflicts" >&2
   echo >&2
   echo "Each path must be owned by exactly ONE NextBSD-* package. Where the Darwin" >&2
-  echo "userland ships an equivalent of a FreeBSD-base file, userland owns the" >&2
+  echo "userland ships an equivalent of a compat-base file, userland owns the" >&2
   echo "canonical copy and the base must strip it (nextbsd-freebsd-compat's" >&2
   echo "strip-collisions.sh). If an overlap is genuinely intended, add the path to" >&2
   echo "scripts/allowed-shared.txt." >&2
