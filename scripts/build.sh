@@ -13,31 +13,41 @@
 # Coherent-snapshot versioning (all share one version this run); UNSIGNED for now.
 set -eux
 
-pkg --version || pkg bootstrap -y   # the VM's own pkg; install-test.sh uses it
-
 ARCH="${ARCH:-amd64}"
 # pkg's ABI uses 'aarch64' for 64-bit ARM, while the artifact files are named 'arm64'.
 case "$ARCH" in arm64) ABIARCH=aarch64 ;; *) ABIARCH="$ARCH" ;; esac
-ABI="FreeBSD:15:${ABIARCH}"
+# NextBSD's ABI (nextbsd-kernel#376): on NextBSD 27.0.0 (kern.osrelease) its
+# pkg computes the ABI NextBSD:27:<arch> and OSVERSION 2700000, from the
+# release rather than __FreeBSD_version. Every package and the catalogue carry
+# that ABI, and pkg create records 2700000 as the package's FreeBSD_version
+# annotation (pkg's name for the osversion). Both come from the environment
+# of each pkg create below, not from the VM.
+NBOSVERSION=2700000
+ABI="NextBSD:$((NBOSVERSION / 100000)):${ABIARCH}"
 VER="0.0.0.$(date -u +%Y%m%d%H%M%S)"
 
 rm -rf stage out tool
 mkdir -p out/repo
 
 # --- NextBSD's own pkg builds the repo (pkg#19) ---
-# `pkg create`, `pkg query` and `pkg repo` below run NextBSD's pkg-static (from
-# nextbsd-contrib, the same build the `pkg` package ships), not the VM's
-# FreeBSD pkg. The VM is amd64 whatever ${ARCH} is, so the workflow always
-# fetches the amd64 artifact as art/tool/; pkg-static is fully static and
-# built for FreeBSD 15.1, so it runs on this 15.1 VM. NextBSD's pkg reads
-# /private/etc/pkg.conf and /private/etc/pkg/, which the VM doesn't have, so
-# it gets an explicit empty config (-C) and repo directory (-R) instead and
-# never falls back to a default path.
+# `pkg create`, `pkg query` and `pkg repo` below, and install-test.sh, run
+# NextBSD's pkg-static (from nextbsd-contrib, the same build the `pkg` package
+# ships), not the VM's own pkg: only NextBSD's pkg knows the NextBSD ABI
+# (nextbsd-contrib src/pkg, patch 0005). The VM is amd64 whatever ${ARCH} is,
+# so the workflow always fetches the amd64 artifact as art/tool/; pkg-static
+# is fully static and built against the releng/15.1 base, so it runs on this
+# 15.1 VM. NextBSD's pkg reads /private/etc/pkg.conf and /private/etc/pkg/,
+# which the VM doesn't have, so it gets an explicit empty config (-C) and repo
+# directory (-R) instead and never falls back to a default path.
 mkdir -p tool/root tool/repos
 tar -C tool/root -xzf art/tool/nextbsd-contrib-pkg-amd64.tar.gz ./usr/sbin/pkg-static
 : > tool/pkg.conf
 NBPKG="$PWD/tool/root/usr/sbin/pkg-static -C $PWD/tool/pkg.conf -R $PWD/tool/repos"
 $NBPKG --version
+# The pkg-static must parse the NextBSD ABI; one from before nextbsd-contrib's
+# patch 0005 stops here with "Unknown OS 'NextBSD' in ABI string".
+_tabi=$(env ABI="${ABI}" OSVERSION="${NBOSVERSION}" $NBPKG config ABI) || _tabi=
+[ "$_tabi" = "$ABI" ] || { echo "ERROR: nextbsd-contrib's pkg-static does not know the ABI ${ABI} (got '${_tabi}'); it needs nextbsd-contrib's patch 0005 (nextbsd-kernel#376)" >&2; exit 1; }
 
 # Every NextBSD-* package carries these two manifest entries:
 #   vital: true -- pkg refuses to delete it (pkg delete without -f, autoremove,
@@ -58,8 +68,10 @@ annotations: { "org.nextbsd.origin": "NextBSD" }'
 #   SHLIB_PROVIDE_PATHS_* are unset, so no path is filtered out) and each
 #   NEEDED entry as shlibs_required. It skips ELF files whose arch differs
 #   from its own ABI, so it runs with the TARGET ABI pinned (the VM is amd64):
-#   without that, every arm64 package would declare no shlibs at all. As in
-#   install-test.sh, pkg wants OSVERSION whenever ABI is pinned.
+#   without that, every arm64 package would declare no shlibs at all. pkg
+#   wants OSVERSION whenever ABI is pinned. The manifest names no abi, so pkg
+#   create stamps it from ABI (abi NextBSD:27:<arch>, arch nextbsd:27:...) and
+#   adds the FreeBSD_version annotation from OSVERSION (2700000).
 mkpkg() {
   _name=$1; _root=$2; _comment=$3; _deps=$4
   shift 4
@@ -71,8 +83,6 @@ comment: "${_comment}"
 desc: "${_comment} — NextBSD ${ARCH} ${VER} snapshot."
 maintainer: "dev@nextbsd.org"
 www: "https://nextbsd.org"
-abi: "${ABI}"
-arch: "${ABI}"
 prefix: "/"
 ${NBMARK}
 UCL
@@ -83,7 +93,7 @@ UCL
     echo "@dir ${_dir}" >> /tmp/plist
   done
   echo "=== ${_name}: $(wc -l < /tmp/plist) files ==="
-  env ABI="${ABI}" OSVERSION="$(uname -K)" \
+  env ABI="${ABI}" OSVERSION="${NBOSVERSION}" \
     $NBPKG create -M /tmp/+MANIFEST -p /tmp/plist -r "${_root}" -o out/repo
 }
 
@@ -125,7 +135,7 @@ repkg() {
   _mver=
 }
 
-# --- 1. NextBSD-freebsd-compat (FreeBSD base: libc/libs, PAM, commands) ---
+# --- 1. NextBSD-freebsd-compat (the compat base: libc/libs, PAM, commands) ---
 mkdir -p stage/compat
 tar -C stage/compat -xzf "art/nextbsd-base-${ARCH}.tar.gz"
 # base<->userland collisions are stripped UPSTREAM in nextbsd-freebsd-compat
@@ -133,7 +143,7 @@ tar -C stage/compat -xzf "art/nextbsd-base-${ARCH}.tar.gz"
 # base<->userland overlap not in its allowlist), so the base tarball arrives
 # already clean. No dedup needed here anymore (the old `rm -f Block.h
 # Block_private.h` became a no-op once the base build owns collision policy).
-mkpkg NextBSD-freebsd-compat stage/compat "NextBSD FreeBSD-compatible base (libc, libs, PAM, login, command suites)" ""
+mkpkg NextBSD-freebsd-compat stage/compat "NextBSD base (libc, libs, PAM, login, command suites)" ""
 
 # --- 2. NextBSD-kernel (just the stripped kernel binary from the obj tree) ---
 mkdir -p stage/kernel/boot/kernel
@@ -144,7 +154,7 @@ mkdir -p /tmp/kx
 tar -C /tmp/kx -xzf "art/nextbsd-kernel-${ARCH}.tar.gz" "$KPATH"
 cp "/tmp/kx/$KPATH" stage/kernel/boot/kernel/kernel
 chmod 555 stage/kernel/boot/kernel/kernel
-mkpkg NextBSD-kernel stage/kernel "NextBSD kernel (FreeBSD 15 KBI, Mach + Darwin glue baked in)" ""
+mkpkg NextBSD-kernel stage/kernel "NextBSD kernel (Mach + Darwin glue baked in)" ""
 
 # The kernel's KERNEL-BUILD-ID (<commit>.<run_id>.<run_attempt>, nextbsd-kernel#326),
 # from the same tarball. Every kext packaged below must have been built for it.
@@ -204,8 +214,9 @@ no_mesa_x_llvm() {
 # (nextbsd/nextbsd#551); the package was NextBSD-kernel-extensions (pkg#23).
 # Glob rather than a fixed name list: the graphics asset is per-arch
 # (graphics-kexts-${ARCH}.tar.gz, nextbsd-kernel-extensions-graphics#36), and the
-# workflow above only ever puts THIS arch's tarballs in art/. The FreeBSD and
-# NVIDIA kexts land in art/freebsd/ and art/nvidia/, outside this glob.
+# workflow above only ever puts THIS arch's tarballs in art/. The
+# nextbsd-kernel-extensions and NVIDIA kexts land in art/freebsd/ and
+# art/nvidia/, outside this glob.
 HAVE_KEXTS=0
 mkdir -p stage/kexts/System/Library/Extensions
 for t in art/*kext*.tar.gz; do
@@ -233,8 +244,8 @@ else
   echo "=== no kexts for ${ARCH} (arch-specific kexts not built) — skipping NextBSD-kernel-extensions-graphics ==="
 fi
 
-# --- 3a. NextBSD-kernel-extensions (the FreeBSD kexts; nextbsd-kernel-extensions) ---
-# The FreeBSD-derived kexts from the new nextbsd-kernel-extensions (pkg#24,
+# --- 3a. NextBSD-kernel-extensions (nextbsd-kernel-extensions) ---
+# The kexts built from FreeBSD's driver sources by nextbsd-kernel-extensions (pkg#24,
 # nextbsd/nextbsd#554), per arch: today IntelWiFi (with its iwlwifi firmware)
 # and autofs on amd64, autofs on arm64. Until pkg#23 this name held the
 # graphics kexts, and until pkg#24 the Intel kexts were in -graphics; an
@@ -246,8 +257,8 @@ if [ -f "art/freebsd/freebsd-kexts-${ARCH}.tar.gz" ]; then
   check_kext_build_ids stage/freebsd/System/Library/Extensions
   chown -R 0:0 stage/freebsd
   find stage/freebsd/System/Library/Extensions -maxdepth 1 -name '*.kext' -exec chmod -R go-w {} +
-  echo "=== staged FreeBSD kexts ==="; ls -1 stage/freebsd/System/Library/Extensions
-  FKCOMMENT="NextBSD kernel extensions (FreeBSD-derived kexts: $(cd stage/freebsd/System/Library/Extensions && ls -d *.kext | sed 's/\.kext$//' | paste -sd, - | sed 's/,/, /g'))"
+  echo "=== staged nextbsd-kernel-extensions kexts ==="; ls -1 stage/freebsd/System/Library/Extensions
+  FKCOMMENT="NextBSD kernel extensions ($(cd stage/freebsd/System/Library/Extensions && ls -d *.kext | sed 's/\.kext$//' | paste -sd, - | sed 's/,/, /g'))"
 else
   echo "ERROR: no freebsd-kexts-${ARCH}.tar.gz from nextbsd-kernel-extensions" >&2
   exit 1
@@ -450,8 +461,6 @@ mkdir -p stage/everything
   echo "desc: \"Installs the complete NextBSD ${ARCH} OS snapshot ${VER}.\""
   echo "maintainer: \"dev@nextbsd.org\""
   echo "www: \"https://nextbsd.org\""
-  echo "abi: \"${ABI}\""
-  echo "arch: \"${ABI}\""
   echo "prefix: \"/\""
   echo "${NBMARK}"
   echo "deps: {"
@@ -466,17 +475,19 @@ mkdir -p stage/everything
   echo "}"
 } > /tmp/+MANIFEST
 : > /tmp/plist
-env ABI="${ABI}" OSVERSION="$(uname -K)" \
+env ABI="${ABI}" OSVERSION="${NBOSVERSION}" \
   $NBPKG create -M /tmp/+MANIFEST -p /tmp/plist -r stage/everything -o out/repo
 
 # --- Layer A (nextbsd#370): fail if any two component packages co-own a path,
 #     BEFORE cataloging/publishing. Fast + deterministic; names the culprit. ---
 sh scripts/check-ownership.sh
 
-# Log each package's vital flag and NextBSD origin stamp (see NBMARK).
-echo "=== vital / org.nextbsd.origin ==="
+# Log each package's abi, osversion, vital flag and NextBSD origin stamp (see
+# NBMARK and mkpkg).
+echo "=== abi / FreeBSD_version / vital / org.nextbsd.origin ==="
 for f in out/repo/*.pkg; do
-  $NBPKG query -F "$f" '%n vital=%V' | tr '\n' ' '
+  $NBPKG query -F "$f" '%n abi=%q vital=%V' | tr '\n' ' '
+  $NBPKG query -F "$f" '%At=%Av' | grep '^FreeBSD_version=' | tr '\n' ' ' || true
   $NBPKG query -F "$f" '%At=%Av' | grep '^org\.nextbsd\.origin=' || echo "(no org.nextbsd.origin)"
 done
 

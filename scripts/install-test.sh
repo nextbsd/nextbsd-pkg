@@ -15,8 +15,6 @@
 # packages pull in (NextBSD-mesa without X, NextBSD-xlibre with it).
 set -eux
 
-pkg --version || pkg bootstrap -y
-
 ARCH="${ARCH:-amd64}"
 # pkg's ABI uses 'aarch64' for 64-bit ARM; artifacts/tags use 'arm64'.
 case "$ARCH" in arm64) ABIARCH=aarch64 ;; *) ABIARCH="$ARCH" ;; esac
@@ -24,26 +22,32 @@ case "$ARCH" in arm64) ABIARCH=aarch64 ;; *) ABIARCH="$ARCH" ;; esac
 REPO="$PWD/out/repo"
 ls "$REPO"/packagesite* >/dev/null 2>&1 || { echo "FATAL: no catalog in $REPO (build.sh did not run?)" >&2; exit 1; }
 
+# NextBSD's pkg-static, which build.sh unpacked into tool/ from the
+# nextbsd-contrib artifact: the packages carry the NextBSD ABI, which only
+# NextBSD's pkg knows, and this is the pkg that installs them on NextBSD. As
+# in build.sh it gets an explicit empty config (-C) and repo directory (-R).
+NBPKGBIN="$PWD/tool/root/usr/sbin/pkg-static"
+[ -x "$NBPKGBIN" ] || { echo "FATAL: no $NBPKGBIN (build.sh did not run?)" >&2; exit 1; }
+
 ROOT=$(mktemp -d)
 REPOS=$(mktemp -d)
-cat > "$REPOS/nextbsd.conf" <<CONF
-nextbsd: { url: "file://$REPO", enabled: yes, signature_type: none }
+# The repository is named NextBSD, as on a NextBSD system: NextBSD's pkg lets
+# packages from any other repository install only under /usr/local and /var,
+# and takes pkg itself only from NextBSD.
+cat > "$REPOS/NextBSD.conf" <<CONF
+NextBSD: { url: "file://$REPO", enabled: yes, signature_type: none }
 CONF
 
-# The VM is FreeBSD 14 but the packages are FreeBSD:15; pin the ABI so pkg
-# accepts the repo. Set it via the ENVIRONMENT (ABI/OSVERSION/IGNORE_OSVERSION),
-# NOT `-o ABI=`: with `-r <root>` pkg derives its ABI from the (empty) root and
-# the -o override doesn't win the repo arch-check, so `pkg update` rejects the
-# FreeBSD:15 repo as "wrong architecture". Env vars override globally — this is
-# exactly what the ISO builders (nextbsd/build.sh, gershwin-on-nextbsd) do. pkg
-# requires OSVERSION when ABI is pinned; IGNORE_OSVERSION reconciles the VM's.
-# Cross-arch is fine: arm64 packages (FreeBSD:15:aarch64) are only untarred here,
-# never executed.
+# Pin the target ABI in the ENVIRONMENT (ABI/OSVERSION), not with `-o ABI=`:
+# with `-r <root>` pkg derives its ABI from the (empty) root, and only the
+# environment wins the repo arch-check. Same values as build.sh stamps:
+# NextBSD:27:<arch>, OSVERSION 2700000. Cross-arch is fine: arm64 packages
+# (NextBSD:27:aarch64) are only untarred here, never executed.
+NBOSVERSION=2700000
 export ASSUME_ALWAYS_YES=yes
-export ABI="FreeBSD:15:${ABIARCH}"
-export IGNORE_OSVERSION=yes
-export OSVERSION="$(uname -K)"
-PKG="pkg -r $ROOT -o REPOS_DIR=$REPOS"
+export ABI="NextBSD:$((NBOSVERSION / 100000)):${ABIARCH}"
+export OSVERSION="${NBOSVERSION}"
+PKG="$NBPKGBIN -C $PWD/tool/pkg.conf -R $REPOS -r $ROOT"
 
 echo "=== install NextBSD-everything into a scratch root (${ARCH}, real extraction) ==="
 $PKG update -f
@@ -84,7 +88,7 @@ rm -rf "$ROOT"
 #    - `pkg install NextBSD-xlibre` on top must bring NextBSD-mesa-x11 (the
 #      server's GLX and glamor link its libGL.so.1) and NextBSD-xlibs.
 ROOT=$(mktemp -d)
-PKG="pkg -r $ROOT -o REPOS_DIR=$REPOS"
+PKG="$NBPKGBIN -C $PWD/tool/pkg.conf -R $REPOS -r $ROOT"
 echo "=== pkg install NextBSD-mesa into a fresh scratch root (${ARCH}) ==="
 $PKG update -f
 $PKG install -y NextBSD-mesa

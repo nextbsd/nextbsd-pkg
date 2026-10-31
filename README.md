@@ -23,18 +23,27 @@ nextbsd-printing-support ──┤
 nextbsd-toolchain ─────────┘
                │  repository_dispatch: userland-updated / contrib-updated
                ▼
-           nextbsd-pkg  ──(pkg create / pkg repo, inside a FreeBSD VM)──▶  flat repo
+           nextbsd-pkg  ──(pkg create / pkg repo, inside a FreeBSD VM)──▶  flat repo (NextBSD:27:<arch>)
                │
                ▼  GitHub Release assets:  continuous-amd64 / continuous-arm64
            users:  pkg update && pkg upgrade     ISO builder:  pkg install NextBSD-everything
 ```
 
-- **Packaging runs in a FreeBSD VM** (vmactions); the Linux runner only downloads the
-  (public) artifacts and uploads the Release assets. `pkg create` and `pkg repo` use
-  **NextBSD's own pkg** (`pkg-static` from the nextbsd-contrib artifact, the same build
-  the `pkg` package ships), with an explicit empty config (`-C`) and repo directory
-  (`-R`), not the VM's FreeBSD pkg. `install-test.sh` still installs with the VM's pkg.
-  It installs `NextBSD-everything` into a scratch root, then, in a second root, checks
+- **Packaging runs in a VM** (vmactions); the Linux runner only downloads the
+  (public) artifacts and uploads the Release assets. The VM image stays FreeBSD 15.1
+  until NextBSD has its own CI guest ([E26](https://github.com/nextbsd/nextbsd/issues/587)).
+  `pkg create`, `pkg repo` and `install-test.sh` use **NextBSD's own pkg** (`pkg-static`
+  from the nextbsd-contrib artifact, the same build the `pkg` package ships), with an
+  explicit empty config (`-C`) and repo directory (`-R`), not the VM's own pkg.
+- **ABI `NextBSD:27:<arch>`** (`NextBSD:27:amd64`, `NextBSD:27:aarch64`;
+  [nextbsd-kernel#376](https://github.com/nextbsd/nextbsd-kernel/issues/376)). Every
+  package and the repo catalogue carry it, with osversion 2700000 (the package's
+  `FreeBSD_version` annotation, pkg's name for it). `build.sh` passes `ABI` and
+  `OSVERSION` to `pkg create`, which stamps both; only NextBSD's pkg knows this ABI
+  (nextbsd-contrib `src/pkg`, patch 0005), and on NextBSD 27 it computes the same
+  ABI by itself.
+- **Install test.** `install-test.sh` installs `NextBSD-everything` into a scratch root
+  from a repo named `NextBSD`, then, in a second root, checks
   that `pkg install NextBSD-mesa` brings neither `NextBSD-xlibs`, `NextBSD-mesa-x11` nor
   `NextBSD-xlibre`, and that `pkg install NextBSD-xlibre` brings `NextBSD-mesa`,
   `NextBSD-mesa-x11` and `NextBSD-xlibs`.
@@ -48,14 +57,18 @@ On NextBSD the repository is already configured. NextBSD's pkg reads
 `/private/etc/pkg.conf` and `/private/etc/pkg/`, and `/private/etc/pkg/NextBSD.conf`
 (from nextbsd-overlays, not from any package) points at
 `.../releases/download/continuous-${MACHINE}` and gives the NextBSD repo a higher
-`priority` (100) than any other. `CONSERVATIVE_UPGRADE` stays on (pkg's default). Images
-also ship FreeBSD's ports repo as `/usr/local/etc/pkg/repos/FreeBSD.conf` (built by
-nextbsd `build.sh`, default priority 0), and other repositories a user adds go there too. The
-shipped FreeBSD repo is **temporary** and will be dropped from the images in the future;
-users who want FreeBSD packages will then add it themselves.
+`priority` (100) than any other. `CONSERVATIVE_UPGRADE` stays on (pkg's default). NextBSD
+ships and configures no other repository; repositories a user adds go in
+`/usr/local/etc/pkg/repos/`.
 
-With another pkg (FreeBSD's, for example, building an image), use a repo file for the
-architecture:
+**FreeBSD packages are not supported.** A user who wants them anyway adds their own
+FreeBSD repository file there and runs pkg with the FreeBSD ABI, for example
+`env ABI=FreeBSD:15:amd64 IGNORE_OSVERSION=yes pkg install <name>`. NextBSD's pkg lets
+such packages install only under `/usr/local` and `/var`.
+
+Elsewhere (building an image on another host), use NextBSD's pkg (nextbsd-contrib's
+`pkg-static`) with `ABI=NextBSD:27:<arch>` and `OSVERSION=2700000` in the environment,
+and a repo file for the architecture:
 
 ```
 # amd64
@@ -81,7 +94,7 @@ pkg upgrade                    # rolling: picks up each new snapshot
 |---|:--:|:--:|---|---|:--:|
 | `NextBSD-freebsd-compat` | ✓ | ✓ | nextbsd-freebsd-compat (base: libc, PAM, commands) | — | ✓ |
 | `NextBSD-kernel` | ✓ | ✓ | nextbsd-kernel (kernel binary) | — | ✓ |
-| `NextBSD-kernel-extensions` | ✓ | ✓ | nextbsd-kernel-extensions (the FreeBSD-derived kexts, 90 on amd64 and 101 on arm64: NICs such as IntelEM and RealtekRE, Wi-Fi (the Wlan family, IntelIwlwifi with its firmware on amd64), USB and HID drivers, storage controllers, the Bluetooth stack and AutoFS; each loads when its hardware appears or when its software asks) | kernel | ✓ |
+| `NextBSD-kernel-extensions` | ✓ | ✓ | nextbsd-kernel-extensions (kexts built from FreeBSD's driver sources, 90 on amd64 and 101 on arm64: NICs such as IntelEM and RealtekRE, Wi-Fi (the Wlan family, IntelIwlwifi with its firmware on amd64), USB and HID drivers, storage controllers, the Bluetooth stack and AutoFS; each loads when its hardware appears or when its software asks) | kernel | ✓ |
 | `NextBSD-kernel-extensions-graphics` | ✓ | ✓ | nextbsd-kernel-extensions-graphics (drm graphics kexts per arch) | kernel | ✓ |
 | `NextBSD-kernel-extensions-nvidia` | ✓ | — | nextbsd-kernel-extensions-nvidia (NVIDIAGraphics595 + modeset/core kexts, GSP firmware, the NVIDIA595 userland bundle) | kernel-extensions-graphics | ✓ |
 | `NextBSD-userland` | ✓ | ✓ | nextbsd-userland (Darwin Mach runtime + daemons) | compat, kernel | ✓ |
@@ -170,7 +183,8 @@ D14, [#26](https://github.com/nextbsd/nextbsd-pkg/issues/26). NextBSD has one X 
 base. `pkg create` records the `SONAME` of every library a package ships as its
 `shlibs_provided`: pkg's `SHLIB_PROVIDE_PATHS_*` settings are unset on the build VM, so
 `/usr/lib` and `/usr/X11/lib` are not filtered out. pkg only reads ELF files built for
-its own ABI, so `build.sh` runs `pkg create` with the target ABI pinned; otherwise the
+its own ABI (for the NextBSD ABI, ELF files with the base's FreeBSD ABI note), so
+`build.sh` runs `pkg create` with the target ABI pinned; otherwise the
 arm64 packages, which are built on the amd64 VM, would declare no libraries at all. The
 build log prints each display package's list. For example:
 
@@ -233,8 +247,8 @@ pixman, expat, freetype, fontconfig, libxkbcommon, xkeyboard-config and the inpu
 from the xlibs and xlibre artifacts into `NextBSD-displayserver-support` before
 `NextBSD-xlibs` and `NextBSD-xlibre` were first packaged here, so no published package
 version ever owned the old `/usr/X11` copies. Neither image build (nextbsd `build.sh`,
-Gershwin's `targets/nextbsd`) unpacks the xlibs or xlibre artifacts outside pkg; both
-take X from FreeBSD packages in `/usr/local` today. A system where someone unpacked an
+Gershwin's `targets/nextbsd`) unpacks the xlibs or xlibre artifacts outside pkg. A
+system where someone unpacked an
 old artifact by hand has unowned `/usr/X11` copies that pkg never removes: delete
 `/usr/X11` before installing these packages.
 
