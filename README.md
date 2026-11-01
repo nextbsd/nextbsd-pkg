@@ -62,9 +62,11 @@ ships and configures no other repository; repositories a user adds go in
 `/usr/local/etc/pkg/repos/`.
 
 **FreeBSD packages are not supported.** A user who wants them anyway adds their own
-FreeBSD repository file there and runs pkg with the FreeBSD ABI, for example
-`env ABI=FreeBSD:15:amd64 IGNORE_OSVERSION=yes pkg install <name>`. NextBSD's pkg lets
-such packages install only under `/usr/local` and `/var`.
+FreeBSD repository file there, with `enabled: no`, and names it on each command with the
+FreeBSD ABI, for example
+`env ABI=FreeBSD:15:amd64 OSVERSION=1501000 IGNORE_OSVERSION=yes pkg install -r FreeBSD <name>`.
+NextBSD's pkg lets such packages install only under `/usr/local` and `/var`. The wiki's
+Installing Packages page has the full steps.
 
 Elsewhere (building an image on another host), use NextBSD's pkg (nextbsd-contrib's
 `pkg-static`) with `ABI=NextBSD:27:<arch>` and `OSVERSION=2700000` in the environment,
@@ -133,10 +135,12 @@ it by name. No meta-package pulls them in (maintainer decision,
 | `NextBSD-printing-support` | Apple's CUPS | gnustep-support |
 | `NextBSD-toolchain` | the on-machine compiler and build tools | — |
 
-**Kernel and kexts must match.** Every kext records the kernel build it was compiled for
-(`NBSDKernelBuildID` in its Info.plist, nextbsd-kernel#326), and the kernel artifact carries its
-own `KERNEL-BUILD-ID`. If any kext differs, the whole run fails before anything is packaged:
-a mismatched pair boots and then panics in an unrelated driver. Rebuild the kexts against the
+**Kernel and kexts must match.** Kexts are tied to the kernel ABI version (`27.0`), not to one
+exact kernel build (nextbsd-kernel#376). The kernel artifact's `KERNEL-BUILD-ID` holds that ABI
+version, and every kext records it in its Info.plist as `NBSDKernelABIVersion` and as the legacy
+`NBSDKernelBuildID`, which this check compares. If any kext differs, the whole run fails before
+anything is packaged: a mismatched pair boots and then panics in an unrelated driver. The ABI
+version is bumped by hand (27.1.0, ...) when a kernel change needs kexts rebuilt. Rebuild the kexts against the
 current kernel (nextbsd-kernel-extensions and nextbsd-kernel-extensions-graphics, then nextbsd-kernel-extensions-nvidia) and rerun.
 
 The NVIDIA userland bundle in `NextBSD-kernel-extensions-nvidia` links libX11, libXext, libdrm

@@ -156,7 +156,7 @@ cp "/tmp/kx/$KPATH" stage/kernel/boot/kernel/kernel
 chmod 555 stage/kernel/boot/kernel/kernel
 mkpkg NextBSD-kernel stage/kernel "NextBSD kernel (Mach + Darwin glue baked in)" ""
 
-# The kernel's KERNEL-BUILD-ID (<commit>.<run_id>.<run_attempt>, nextbsd-kernel#326),
+# The kernel's KERNEL-BUILD-ID: its kext ABI version, e.g. 27.0 (nextbsd-kernel#376; it was <commit>.<run_id>.<run_attempt> under #326),
 # from the same tarball. Every kext packaged below must have been built for it.
 KIDPATH=$(tar tzf "art/nextbsd-kernel-${ARCH}.tar.gz" | grep -E 'sys/NEXTBSD/KERNEL-BUILD-ID$' | head -1)
 [ -n "$KIDPATH" ] || { echo "ERROR: the kernel artifact carries no KERNEL-BUILD-ID (it predates nextbsd-kernel#326)" >&2; exit 1; }
