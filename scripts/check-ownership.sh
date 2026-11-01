@@ -11,9 +11,10 @@
 set -eu
 
 # Every component stage dir build.sh created (one per package), so a new
-# package is covered with no change here. stage/everything is the empty meta —
-# it owns nothing, so it is intentionally omitted.
-comps=$(cd stage && for d in *; do [ -d "$d" ] && [ "$d" != everything ] && echo "$d"; done | tr '\n' ' ')
+# package is covered with no change here. That includes stage/everything: the
+# meta owns /System/Library/CoreServices/SystemVersion.plist
+# (nextbsd/nextbsd#536), which no other package may ship.
+comps=$(cd stage && for d in *; do [ -d "$d" ] && echo "$d"; done | tr '\n' ' ')
 [ -n "$comps" ] || { echo "FATAL: no component stage dirs under stage/ (build.sh did not run?)" >&2; exit 1; }
 
 owners=$(mktemp)

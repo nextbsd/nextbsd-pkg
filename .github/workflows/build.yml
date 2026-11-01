@@ -61,6 +61,11 @@ jobs:
             --pattern "nextbsd-base-${ARCH}.tar.gz" --dir art --clobber
           gh release download continuous -R nextbsd/nextbsd-kernel \
             --pattern "nextbsd-kernel-${ARCH}.tar.gz" --dir art --clobber
+          # The kernel's version (kern.osrelease, e.g. 27.0.0): the first
+          # part of every package's version, 27.0.0.<run_number>
+          # (nextbsd/nextbsd#536).
+          gh release download continuous -R nextbsd/nextbsd-kernel \
+            --pattern KERNEL-VERSION --dir art --clobber
           gh release download continuous -R nextbsd/nextbsd-userland \
             --pattern "nextbsd-userland-${ARCH}.tar.gz" --dir art --clobber
           # The rest are one artifact per repo, nextbsd-<repo>-<arch>.tar.gz,
@@ -137,7 +142,10 @@ jobs:
             # NextBSD-everything into a scratch root here, BEFORE the publish step
             # below, so a repo that can't install itself fails CI instead of
             # shipping (nextbsd#370). Both run on PRs too (publish does not).
-            ARCH=${{ matrix.arch }} sh scripts/build.sh
+            # NBBUILD: this run's number, the <build> in every package's
+            # version 27.0.0.<build> and SystemVersion.plist's
+            # ProductBuildVersion (nextbsd/nextbsd#536).
+            ARCH=${{ matrix.arch }} NBBUILD=${{ github.run_number }} sh scripts/build.sh
             ARCH=${{ matrix.arch }} sh scripts/install-test.sh
             # copyback rsyncs the whole work dir back to the runner, and only
             # out/repo is needed (publish). The staged trees and artifacts are
@@ -177,6 +185,12 @@ jobs:
               gh release delete-asset "$TAG" "$a" -R "$R" --yes
             fi
           done
+          # The release notes name the snapshot: NextBSD-everything's version,
+          # 27.0.0.<build> (nextbsd/nextbsd#536).
+          EV=$(cd out/repo && ls NextBSD-everything-*.pkg | sed 's/^NextBSD-everything-//; s/\.pkg$//')
+          gh release edit "$TAG" -R "$R" --notes "Flat pkg(8) repository. Configure pkg with a NextBSD.conf pointing at this tag's download URL.
+
+          Packages: NextBSD ${EV%.*} (${EV##*.}), version ${EV}, built by ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           echo "Published (${{ matrix.arch }}) — release assets now:"
           gh release view "$TAG" -R "$R" --json assets -q '.assets[].name' | sort
 
