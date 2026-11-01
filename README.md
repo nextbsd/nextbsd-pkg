@@ -47,6 +47,23 @@ nextbsd-toolchain ─────────┘
   that `pkg install NextBSD-mesa` brings neither `NextBSD-xlibs`, `NextBSD-mesa-x11` nor
   `NextBSD-xlibre`, and that `pkg install NextBSD-xlibre` brings `NextBSD-mesa`,
   `NextBSD-mesa-x11` and `NextBSD-xlibs`.
+- **Version `27.0.0.<build>`** on every NextBSD package
+  ([nextbsd#536](https://github.com/nextbsd/nextbsd/issues/536)): `27.0.0` is the
+  kernel's `KERNEL-VERSION` asset (`kern.osrelease`, so it matches `uname -r`), and
+  `<build>` is the workflow's `run_number`. The build time is the
+  `org.nextbsd.build_date` annotation. pkg compares versions numerically, component
+  by component (libpkg `pkg_version_cmp`), so `27.0.0.<build>` is newer than the
+  `0.0.0.<timestamp>` versions published before it, and `pkg upgrade` moves to it.
+  Rerunning a publish run keeps its `run_number`, so it republishes the same version
+  and installed systems don't upgrade to it; start a new run instead.
+- **`SystemVersion.plist`.** `NextBSD-everything` owns
+  `/System/Library/CoreServices/SystemVersion.plist`, with Darwin's keys:
+  `ProductName` `NextBSD`, `ProductVersion` and `ProductUserVisibleVersion`
+  `27.0.0`, `ProductBuildVersion` `<build>`, and NextBSD's `NBSDBuildDate`.
+  `sw_vers(1)`, `nextbsd-version` and the login banner read it, so they show the
+  version `pkg info NextBSD-everything` does. A Lua post-install script in
+  `NextBSD-everything` rewrites `/etc/os-release` (`NAME`, `VERSION`, `VERSION_ID`,
+  `BUILD_ID`, `PRETTY_NAME`) from the plist on every install and upgrade.
 - **Publishing is manual** (`workflow_dispatch`). Pull requests build and install-test
   but never publish.
 - **Flat repo on Release assets** (asset names can't contain `/`), one tag per arch.
@@ -110,7 +127,7 @@ pkg upgrade                    # rolling: picks up each new snapshot
 | `NextBSD-printing-support` | ✓ | ✓ | nextbsd-printing-support (Apple's CUPS; GnuTLS from gnustep-support) | compat, userland, gnustep-support | — |
 | `NextBSD-toolchain` | ✓ | ✓ | nextbsd-toolchain (on-machine clang/lld 19.1.7, gmake, pkgconf, Apple's Git, CMake, GNU m4/autoconf/automake/libtool and their private Perl) | compat, userland | — |
 | `pkg` | ✓ | ✓ | nextbsd-contrib's pkg artifact (NextBSD's pkg(8) 2.8.4; version from its `pkg.pc`) | compat | ✓ |
-| `NextBSD-everything` (meta) | ✓ | ✓ | — | base, kernel, userland, contrib, kernel-extensions-graphics, kernel-extensions (and -nvidia on amd64) and pkg | |
+| `NextBSD-everything` (meta) | ✓ | ✓ | `SystemVersion.plist`, written by `build.sh` | base, kernel, userland, contrib, kernel-extensions-graphics, kernel-extensions (and -nvidia on amd64) and pkg | |
 
 Each package repackages one of its repo's `continuous` artifacts as is (nextbsd-mesa
 publishes two: `NextBSD-mesa` and `NextBSD-mesa-x11`), and every package of

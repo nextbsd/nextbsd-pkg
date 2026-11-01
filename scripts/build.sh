@@ -24,7 +24,28 @@ case "$ARCH" in arm64) ABIARCH=aarch64 ;; *) ABIARCH="$ARCH" ;; esac
 # of each pkg create below, not from the VM.
 NBOSVERSION=2700000
 ABI="NextBSD:$((NBOSVERSION / 100000)):${ABIARCH}"
-VER="0.0.0.$(date -u +%Y%m%d%H%M%S)"
+# Package version (nextbsd/nextbsd#536): <release>.<build> for every NextBSD-*
+# package, e.g. 27.0.0.42.
+#   <release> is the kernel's KERNEL-VERSION (kern.osrelease, so it matches
+#     `uname -r`), the asset nextbsd-kernel publishes on `continuous`; the
+#     workflow downloads it into art/.
+#   <build> is the workflow's run_number (NBBUILD): it only increases, and it
+#     is short.
+# pkg compares versions component by component, numerically (libpkg
+# pkg_version.c, pkg_version_cmp), so 27.0.0.<build> sorts above the
+# 0.0.0.<timestamp> versions published before it and systems upgrade normally.
+# The build time, which the old version carried, is the org.nextbsd.build_date
+# annotation on every package and NBSDBuildDate in SystemVersion.plist.
+[ -s art/KERNEL-VERSION ] || { echo "ERROR: no art/KERNEL-VERSION (nextbsd-kernel's continuous asset)" >&2; exit 1; }
+NBRELEASE=$(tr -d '[:space:]' < art/KERNEL-VERSION)
+echo "$NBRELEASE" | grep -Eqx '[0-9]+\.[0-9]+\.[0-9]+' \
+  || { echo "ERROR: KERNEL-VERSION '$NBRELEASE' is not <major>.<minor>.<patch>" >&2; exit 1; }
+NBBUILD="${NBBUILD:-}"
+echo "$NBBUILD" | grep -Eqx '[1-9][0-9]*' \
+  || { echo "ERROR: NBBUILD '$NBBUILD' must be the workflow's run_number" >&2; exit 1; }
+VER="${NBRELEASE}.${NBBUILD}"
+NBBUILDDATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+echo "NextBSD ${NBRELEASE} (${NBBUILD}): package version ${VER}, built ${NBBUILDDATE}"
 
 rm -rf stage out tool
 mkdir -p out/repo
@@ -57,8 +78,10 @@ _tabi=$(env ABI="${ABI}" OSVERSION="${NBOSVERSION}" $NBPKG config ABI) || _tabi=
 #   annotation org.nextbsd.origin: NextBSD -- NextBSD's pkg (nextbsd-contrib)
 #     lets a local package file without it install only under /usr/local and
 #     /var, and only a stamped pkg may replace pkg.
-NBMARK='vital: true
-annotations: { "org.nextbsd.origin": "NextBSD" }'
+# and the annotation org.nextbsd.build_date: when this run built it (UTC, ISO
+# 8601), which the version no longer carries (nextbsd/nextbsd#536).
+NBMARK="vital: true
+annotations: { \"org.nextbsd.origin\": \"NextBSD\", \"org.nextbsd.build_date\": \"${NBBUILDDATE}\" }"
 
 # mkpkg <name> <stagedir> <comment> <deps-ucl-or-empty> [<dir>...]
 #   Every file and symlink in <stagedir> goes in the plist. Directories are
@@ -452,7 +475,74 @@ repkg -a nextbsd-contrib-pkg -v "$PKGVER" pkg pkg "NextBSD's pkg(8) package mana
 # --- 14. NextBSD-everything (meta: installs the whole OS for this arch) ---
 # The display stack (nextbsd#571 is still open) and the E24 packages (D11;
 # Gershwin's nextbsd.txt) are deliberately not in it.
-mkdir -p stage/everything
+#
+# It owns one file, Darwin's /System/Library/CoreServices/SystemVersion.plist
+# (nextbsd/nextbsd#536): the installed OS's name, version and build, so every
+# `pkg upgrade` of NextBSD-everything moves it with the packages. sw_vers(1)
+# (nextbsd-userland), nextbsd-version and /etc/os-release (the login banner's
+# source) read it. The keys are Darwin's; NBSDBuildDate is NextBSD's, named
+# like the kexts' NBSDKernelBuildID.
+mkdir -p stage/everything/System/Library/CoreServices
+cat > stage/everything/System/Library/CoreServices/SystemVersion.plist <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>NBSDBuildDate</key>
+	<string>${NBBUILDDATE}</string>
+	<key>ProductBuildVersion</key>
+	<string>${NBBUILD}</string>
+	<key>ProductName</key>
+	<string>NextBSD</string>
+	<key>ProductUserVisibleVersion</key>
+	<string>${NBRELEASE}</string>
+	<key>ProductVersion</key>
+	<string>${NBRELEASE}</string>
+</dict>
+</plist>
+PLIST
+chown -R 0:0 stage/everything
+chmod 0644 stage/everything/System/Library/CoreServices/SystemVersion.plist
+#
+# /etc/os-release follows the plist. It is not package-owned (it lives in the
+# admin's /etc), so NextBSD-everything regenerates it from the plist in a Lua
+# post-install script, which pkg runs on every install and every upgrade of
+# this package. pkg runs Lua scripts in-process against the install root
+# (pkg -r included, so the cross-arch image build in nextbsd works too), and
+# its io.open/os.rename resolve paths beneath that root. Without an /etc in
+# the root (install-test.sh's scratch root) it does nothing. nextbsd's
+# build.sh writes the same lines for a fresh image.
+rm -rf /tmp/everything-meta; mkdir -p /tmp/everything-meta
+cat > /tmp/everything-meta/pkg-post-install.lua <<'LUA'
+-- Regenerate /etc/os-release from SystemVersion.plist (nextbsd/nextbsd#536).
+local plist = "/System/Library/CoreServices/SystemVersion.plist"
+local f = io.open(plist, "r")
+if f ~= nil then
+  local s = f:read("*a")
+  f:close()
+  local function key(k)
+    return s:match("<key>" .. k .. "</key>%s*<string>([^<]*)</string>")
+  end
+  local name, ver, build = key("ProductName"), key("ProductVersion"), key("ProductBuildVersion")
+  if name == nil or ver == nil or build == nil then
+    pkg.print_msg("NextBSD-everything: " .. plist .. " has no version; /etc/os-release is unchanged")
+  else
+    local out = io.open("/etc/os-release.new", "w")
+    if out ~= nil then
+      out:write('NAME="' .. name .. '"\n',
+                'VERSION="' .. ver .. ' (' .. build .. ')"\n',
+                'VERSION_ID="' .. ver .. '"\n',
+                'BUILD_ID="' .. build .. '"\n',
+                'PRETTY_NAME="' .. name .. ' ' .. ver .. ' (' .. build .. ')"\n',
+                'ID=nextbsd\n',
+                'ID_LIKE=freebsd\n',
+                'HOME_URL="https://nextbsd.org"\n')
+      out:close()
+      os.rename("/etc/os-release.new", "/etc/os-release")
+    end
+  end
+end
+LUA
 {
   echo "name: NextBSD-everything"
   echo "origin: nextbsd/NextBSD-everything"
@@ -473,10 +563,14 @@ mkdir -p stage/everything
   echo "  NextBSD-kernel-extensions: { origin: \"nextbsd/NextBSD-kernel-extensions\", version: \"${VER}\" }"
   [ "$HAVE_NVIDIA" = 1 ] && echo "  NextBSD-kernel-extensions-nvidia: { origin: \"nextbsd/NextBSD-kernel-extensions-nvidia\", version: \"${VER}\" }"
   echo "}"
-} > /tmp/+MANIFEST
-: > /tmp/plist
+} > /tmp/everything-meta/+MANIFEST
+echo /System/Library/CoreServices/SystemVersion.plist > /tmp/plist
+# -m: a metadata directory, so pkg create picks up pkg-post-install.lua beside
+# the +MANIFEST.
 env ABI="${ABI}" OSVERSION="${NBOSVERSION}" \
-  $NBPKG create -M /tmp/+MANIFEST -p /tmp/plist -r stage/everything -o out/repo
+  $NBPKG create -m /tmp/everything-meta -p /tmp/plist -r stage/everything -o out/repo
+echo "=== NextBSD-everything: SystemVersion.plist ==="
+$NBPKG query -F out/repo/NextBSD-everything-"${VER}".pkg '%n %v: %Fp'
 
 # --- Layer A (nextbsd#370): fail if any two component packages co-own a path,
 #     BEFORE cataloging/publishing. Fast + deterministic; names the culprit. ---
