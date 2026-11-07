@@ -113,6 +113,7 @@ pkg upgrade                    # rolling: picks up each new snapshot
 |---|:--:|:--:|---|---|:--:|
 | `NextBSD-freebsd-compat` | ✓ | ✓ | nextbsd-freebsd-compat (base: libc, PAM, commands) | — | ✓ |
 | `NextBSD-bootloader` | ✓ | ✓ | nextbsd-freebsd-compat's base artifact, its `/boot` (loader, `loader.efi`, Lua, `defaults/loader.conf`, images, fonts; boot blocks on amd64) | — | ✓ |
+| `NextBSD-bootloader-gershwin` | ✓ | ✓ | written by `build.sh`: only `/boot/loader.conf.d/bootsplash.conf`, `bootsplash_style="grey"` (the Gershwin grey boot splash; without it the splash is black). The only file that may set `bootsplash_style` | bootloader | — |
 | `NextBSD-kernel` | ✓ | ✓ | nextbsd-kernel (kernel binary) | — | ✓ |
 | `NextBSD-kernel-extensions` | ✓ | ✓ | nextbsd-kernel-extensions (kexts built from FreeBSD's driver sources, 90 on amd64 and 101 on arm64: NICs such as IntelEM and RealtekRE, Wi-Fi (the Wlan family, IntelIwlwifi with its firmware on amd64), USB and HID drivers, storage controllers, the Bluetooth stack and AutoFS; each loads when its hardware appears or when its software asks) | kernel | ✓ |
 | `NextBSD-kernel-extensions-graphics` | ✓ | ✓ | nextbsd-kernel-extensions-graphics (drm graphics kexts per arch) | kernel | ✓ |
