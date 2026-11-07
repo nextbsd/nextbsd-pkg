@@ -197,6 +197,22 @@ echo "=== NextBSD-bootloader: /boot from the base artifact ==="
 ( cd stage/bootloader && find . \( -type f -o -type l \) | sort )
 mkpkg NextBSD-bootloader stage/bootloader "NextBSD boot loader (loader, its Lua, defaults, images, fonts and boot blocks)" ""
 
+# --- 1b. NextBSD-bootloader-gershwin: the grey boot splash (nextbsd-pkg#45, E19 B2) ---
+# Data only, written here like NextBSD-everything's SystemVersion.plist. It
+# ships exactly one file, /boot/loader.conf.d/bootsplash.conf, which sets the
+# loader's bootsplash_style to grey (#5F6770 background, dark spinner); without
+# it the style is the built-in black. It must stay the ONLY file anywhere that
+# sets bootsplash_style: the loader reads loader.conf.d in unsorted readdir
+# order (config.lua), so a second setter would race it. Base nextbsd.conf
+# (nextbsd-overlays) never sets it. Gershwin images install this package by
+# name; it is optional and NOT in NextBSD-everything. `pkg delete` reverts to
+# black on the next boot.
+mkdir -p stage/bootloader-gershwin/boot/loader.conf.d
+printf 'bootsplash_style="grey"\n' > stage/bootloader-gershwin/boot/loader.conf.d/bootsplash.conf
+chown -R 0:0 stage/bootloader-gershwin
+chmod 0644 stage/bootloader-gershwin/boot/loader.conf.d/bootsplash.conf
+mkpkg NextBSD-bootloader-gershwin stage/bootloader-gershwin "NextBSD grey boot splash style for Gershwin (bootsplash_style=grey)" "$(dep NextBSD-bootloader)"
+
 mkpkg NextBSD-freebsd-compat stage/compat "NextBSD base (libc, libs, PAM, login, command suites)" ""
 
 # --- 2. NextBSD-kernel (just the stripped kernel binary from the obj tree) ---
