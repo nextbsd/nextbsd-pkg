@@ -103,7 +103,7 @@ Then install the whole OS via the meta-package (and upgrade as CI republishes):
 
 ```sh
 pkg update
-pkg install NextBSD-everything      # base + kernel + userland + contrib + kernel-extensions (+ -graphics, + NVIDIA on amd64) + pkg
+pkg install NextBSD-everything      # base + bootloader + kernel + userland + contrib + kernel-extensions (+ -graphics, + NVIDIA on amd64) + pkg
 pkg upgrade                    # rolling: picks up each new snapshot
 ```
 
@@ -112,6 +112,7 @@ pkg upgrade                    # rolling: picks up each new snapshot
 | package | amd64 | arm64 | from | depends on | in `NextBSD-everything` |
 |---|:--:|:--:|---|---|:--:|
 | `NextBSD-freebsd-compat` | ✓ | ✓ | nextbsd-freebsd-compat (base: libc, PAM, commands) | — | ✓ |
+| `NextBSD-bootloader` | ✓ | ✓ | nextbsd-freebsd-compat's base artifact, its `/boot` (loader, `loader.efi`, Lua, `defaults/loader.conf`, images, fonts; boot blocks on amd64) | — | ✓ |
 | `NextBSD-kernel` | ✓ | ✓ | nextbsd-kernel (kernel binary) | — | ✓ |
 | `NextBSD-kernel-extensions` | ✓ | ✓ | nextbsd-kernel-extensions (kexts built from FreeBSD's driver sources, 90 on amd64 and 101 on arm64: NICs such as IntelEM and RealtekRE, Wi-Fi (the Wlan family, IntelIwlwifi with its firmware on amd64), USB and HID drivers, storage controllers, the Bluetooth stack and AutoFS; each loads when its hardware appears or when its software asks) | kernel | ✓ |
 | `NextBSD-kernel-extensions-graphics` | ✓ | ✓ | nextbsd-kernel-extensions-graphics (drm graphics kexts per arch) | kernel | ✓ |
@@ -127,14 +128,14 @@ pkg upgrade                    # rolling: picks up each new snapshot
 | `NextBSD-printing-support` | ✓ | ✓ | nextbsd-printing-support (Apple's CUPS; GnuTLS from gnustep-support) | compat, userland, gnustep-support | — |
 | `NextBSD-toolchain` | ✓ | ✓ | nextbsd-toolchain (on-machine clang/lld 19.1.7, gmake, pkgconf, Apple's Git, CMake, GNU m4/autoconf/automake/libtool and their private Perl) | compat, userland | — |
 | `pkg` | ✓ | ✓ | nextbsd-contrib's pkg artifact (NextBSD's pkg(8) 2.8.4; version from its `pkg.pc`) | compat | ✓ |
-| `NextBSD-everything` (meta) | ✓ | ✓ | `SystemVersion.plist`, written by `build.sh` | base, kernel, userland, contrib, kernel-extensions-graphics, kernel-extensions (and -nvidia on amd64) and pkg | |
+| `NextBSD-everything` (meta) | ✓ | ✓ | `SystemVersion.plist`, written by `build.sh` | base, bootloader, kernel, userland, contrib, kernel-extensions-graphics, kernel-extensions (and -nvidia on amd64) and pkg | |
 
 Each package repackages one of its repo's `continuous` artifacts as is (nextbsd-mesa
 publishes two: `NextBSD-mesa` and `NextBSD-mesa-x11`), and every package of
 one run shares one snapshot version. The dependencies are the artifacts' ELF `NEEDED`
 entries matched to the files the other artifacts ship.
 
-**Optional base packages.** `NextBSD-everything` is the core OS only: base, kernel,
+**Optional base packages.** `NextBSD-everything` is the core OS only: base, bootloader, kernel,
 userland, contrib, the kernel extensions and pkg. Everything else NextBSD publishes is an
 **optional base package**: built and stamped like the core set, installed into `/usr`
 or `/usr/X11` (never `/usr/local`), but only installed when a user or an image asks for

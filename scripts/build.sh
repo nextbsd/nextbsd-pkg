@@ -166,6 +166,37 @@ tar -C stage/compat -xzf "art/nextbsd-base-${ARCH}.tar.gz"
 # base<->userland overlap not in its allowlist), so the base tarball arrives
 # already clean. No dedup needed here anymore (the old `rm -f Block.h
 # Block_private.h` became a no-op once the base build owns collision policy).
+
+# --- 1a. NextBSD-bootloader: the base artifact's /boot (nextbsd-pkg#44, E19 B1) ---
+# The loader ships in the base tarball, which stays unchanged (nextbsd's
+# artifacts mode and nextbsd-ci's assemble-image.sh unpack it whole). Here its
+# /boot moves out of NextBSD-freebsd-compat into its own package, which the
+# splash assets and NextBSD-bootloader-gershwin build on. Today that is all of
+# /boot, on both arches: loader, loader.efi and their links (loader_lua,
+# zfsloader, loader_lua.efi), loader_4th/loader_simp (and their .efi),
+# loader.kboot, userboot*.so, lua/, defaults/loader.conf, images/, fonts/,
+# the Forth files, loader.rc, menu.rc, the loader.help.* pages, and on amd64
+# the boot blocks (boot0, boot0sio, boot1, boot2, boot, mbr, pmbr, gptboot,
+# gptzfsboot, gptboot.efi, boot1.efi, cdboot, isoboot, pxeboot). The base
+# artifact has no /boot/kernel and no /boot/loader.conf.d files:
+# NextBSD-kernel owns /boot/kernel/kernel, the kexts live in
+# /System/Library/Extensions, and loader.conf.d/nextbsd.conf comes from
+# nextbsd-overlays. check-ownership.sh still fails the run if any of them
+# ever overlap.
+#
+# Upgrades: the files move from NextBSD-freebsd-compat to NextBSD-bootloader in
+# one `pkg upgrade` of NextBSD-everything, which pulls the new package in at
+# the same snapshot version. pkg's scheduler orders the old package's upgrade
+# before the new package's install when the old one ships a file the new one
+# does (libpkg pkg_jobs_schedule.c, "old conflicts new"), as for the kext moves
+# of pkg#23 and pkg#24.
+mkdir -p stage/bootloader
+[ -d stage/compat/boot ] || { echo "ERROR: the base artifact has no /boot (no loader to package)" >&2; exit 1; }
+mv stage/compat/boot stage/bootloader/boot
+echo "=== NextBSD-bootloader: /boot from the base artifact ==="
+( cd stage/bootloader && find . \( -type f -o -type l \) | sort )
+mkpkg NextBSD-bootloader stage/bootloader "NextBSD boot loader (loader, its Lua, defaults, images, fonts and boot blocks)" ""
+
 mkpkg NextBSD-freebsd-compat stage/compat "NextBSD base (libc, libs, PAM, login, command suites)" ""
 
 # --- 2. NextBSD-kernel (just the stripped kernel binary from the obj tree) ---
@@ -547,7 +578,7 @@ LUA
   echo "name: NextBSD-everything"
   echo "origin: nextbsd/NextBSD-everything"
   echo "version: \"${VER}\""
-  echo "comment: \"NextBSD-everything meta-package (base + kernel + userland + contrib + kernel-extensions + pkg$([ "$HAVE_KEXTS" = 1 ] && echo ' + kernel-extensions-graphics')$([ "$HAVE_NVIDIA" = 1 ] && echo ' + NVIDIA'))\""
+  echo "comment: \"NextBSD-everything meta-package (base + bootloader + kernel + userland + contrib + kernel-extensions + pkg$([ "$HAVE_KEXTS" = 1 ] && echo ' + kernel-extensions-graphics')$([ "$HAVE_NVIDIA" = 1 ] && echo ' + NVIDIA'))\""
   echo "desc: \"Installs the complete NextBSD ${ARCH} OS snapshot ${VER}.\""
   echo "maintainer: \"dev@nextbsd.org\""
   echo "www: \"https://nextbsd.org\""
@@ -555,6 +586,7 @@ LUA
   echo "${NBMARK}"
   echo "deps: {"
   echo "  NextBSD-freebsd-compat: { origin: \"nextbsd/NextBSD-freebsd-compat\", version: \"${VER}\" }"
+  echo "  NextBSD-bootloader: { origin: \"nextbsd/NextBSD-bootloader\", version: \"${VER}\" }"
   echo "  NextBSD-kernel: { origin: \"nextbsd/NextBSD-kernel\", version: \"${VER}\" }"
   echo "  NextBSD-userland: { origin: \"nextbsd/NextBSD-userland\", version: \"${VER}\" }"
   echo "  NextBSD-contrib: { origin: \"nextbsd/NextBSD-contrib\", version: \"${VER}\" }"
