@@ -140,7 +140,7 @@ pkg upgrade                    # rolling: picks up each new snapshot
 | `pkg` | ✓ | ✓ | nextbsd-contrib's pkg artifact (NextBSD's pkg(8) 2.8.4; version from its `pkg.pc`) | compat | ✓ |
 | `NextBSD-server` (meta) | ✓ | ✓ | `SystemVersion.plist`, written by `build.sh`; the os-release post-install script | base, bootloader, kernel, userland, contrib, kernel-extensions-graphics, kernel-extensions (and -nvidia on amd64) and pkg | |
 | `NextBSD-everything` (transitional) | ✓ | ✓ | nothing: an empty package, not vital ([below](#nextbsd-everything-becomes-nextbsd-server)) | server | |
-| `NextBSD-desktop` (meta) | ✓ | ✓ | nothing. **Built only once nextbsd-desktop publishes** | server, gnustep, desktop-apps | |
+| `NextBSD-desktop` (meta) | ✓ | ✓ | nothing. **Built only once nextbsd-desktop publishes** | server, gnustep, desktop-apps, toolchain | |
 
 Each package repackages one of its repo's `continuous` artifacts as is (nextbsd-mesa
 publishes two: `NextBSD-mesa` and `NextBSD-mesa-x11`), and every package of
@@ -151,7 +151,8 @@ entries matched to the files the other artifacts ship.
 userland, contrib, the kernel extensions and pkg. Everything else NextBSD publishes is an
 **optional base package**: built and stamped like the core set, installed into `/usr`
 or `/usr/X11` (never `/usr/local`), but only installed when a user or an image asks for
-it by name, or through `NextBSD-desktop`, which brings `NextBSD-gnustep`, the desktop and
+it by name, or through `NextBSD-desktop`, which brings `NextBSD-gnustep`, the desktop,
+`NextBSD-toolchain` (Software.app builds apps with its git, gmake and clang) and
 what they link (maintainer decision,
 [nextbsd#571](https://github.com/nextbsd/nextbsd/issues/571); E47,
 [nextbsd#671](https://github.com/nextbsd/nextbsd/issues/671)).
