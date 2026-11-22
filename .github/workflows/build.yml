@@ -24,7 +24,10 @@ name: Build NextBSD packages
 # Both arches ship base + kernel + userland + contrib + kernel-extensions (from
 # nextbsd-kernel-extensions) + kernel-extensions-graphics, plus the
 # display server stack (displayserver-support, xlibs, mesa, xlibre) and the E24
-# packages (gnustep-, printing-support, toolchain). The kext sets
+# packages (gnustep-, printing-support, toolchain), NextBSD-gnustep (the
+# GNUstep core, nextbsd-gnustep) and, once nextbsd-desktop publishes, the
+# desktop; the NextBSD-server, NextBSD-everything (transitional) and
+# NextBSD-desktop meta-packages tie them together. The kext sets
 # differ (arm64 has no Intel/AMD/Radeon/NVIDIA/Bochs/VBox parts, and ships the
 # drm core + the virtio-gpu trio instead), so the graphics asset is per-arch;
 # build.sh still skips the package entirely when an arch has no kexts at all.
@@ -78,7 +81,7 @@ jobs:
           #     what GNUstep needs plus the on-machine toolchain. Gershwin
           #     builds GNUstep itself (D10). nextbsd-gershwin-support is
           #     deliberately not packaged (maintainer, 2026-10-25).
-          # None of the display or E24 packages is in NextBSD-everything.
+          # None of the display or E24 packages is in NextBSD-server.
           for r in contrib \
                    displayserver-support xlibs mesa xlibre \
                    gnustep-support printing-support toolchain; do
@@ -90,6 +93,21 @@ jobs:
           # as NextBSD-mesa-x11.
           gh release download continuous -R nextbsd/nextbsd-mesa \
             --pattern "nextbsd-mesa-x11-${ARCH}.tar.gz" --dir art --clobber
+          # The GNUstep core (nextbsd/nextbsd#674), packaged as
+          # NextBSD-gnustep. Only the staged install: nextbsd-gnustep's
+          # SDK artifact (nextbsd-gnustep-sdk-<arch>) is for cross-compiling
+          # and is not packaged, and the exact pattern leaves it out.
+          gh release download continuous -R nextbsd/nextbsd-gnustep \
+            --pattern "nextbsd-gnustep-${ARCH}.tar.gz" --dir art --clobber
+          # The desktop (nextbsd/nextbsd#675), packaged as NextBSD-desktop-apps
+          # under the NextBSD-desktop meta-package (#676). Optional until
+          # nextbsd-desktop publishes: without it build.sh builds neither.
+          if gh release download continuous -R nextbsd/nextbsd-desktop \
+               --pattern "nextbsd-desktop-${ARCH}.tar.gz" --dir art --clobber; then
+            echo "nextbsd-desktop: packaging NextBSD-desktop-apps and NextBSD-desktop"
+          else
+            echo "nextbsd-desktop has no nextbsd-desktop-${ARCH}.tar.gz on continuous yet; NextBSD-desktop is skipped"
+          fi
           # NextBSD's own pkg (pkg#19), built by nextbsd-contrib in its own
           # artifact: packaged as `pkg` for this arch, and the amd64 build's
           # pkg-static (in art/tool/) is what build.sh and install-test.sh
@@ -139,7 +157,7 @@ jobs:
             set -e
             # build.sh assembles the flat repo and runs Layer A (check-ownership.sh)
             # before cataloging. install-test.sh is Layer B: it really installs
-            # NextBSD-everything into a scratch root here, BEFORE the publish step
+            # NextBSD-server into a scratch root here, BEFORE the publish step
             # below, so a repo that can't install itself fails CI instead of
             # shipping (nextbsd#370). Both run on PRs too (publish does not).
             # NBBUILD: this run's number, the <build> in every package's
@@ -185,9 +203,9 @@ jobs:
               gh release delete-asset "$TAG" "$a" -R "$R" --yes
             fi
           done
-          # The release notes name the snapshot: NextBSD-everything's version,
+          # The release notes name the snapshot: NextBSD-server's version,
           # 27.0.0.<build> (nextbsd/nextbsd#536).
-          EV=$(cd out/repo && ls NextBSD-everything-*.pkg | sed 's/^NextBSD-everything-//; s/\.pkg$//')
+          EV=$(cd out/repo && ls NextBSD-server-*.pkg | sed 's/^NextBSD-server-//; s/\.pkg$//')
           gh release edit "$TAG" -R "$R" --notes "Flat pkg(8) repository. Configure pkg with a NextBSD.conf pointing at this tag's download URL.
 
           Packages: NextBSD ${EV%.*} (${EV##*.}), version ${EV}, built by ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
@@ -215,7 +233,7 @@ jobs:
           mkdir -p art/tool
           gh release download continuous -R nextbsd/nextbsd-contrib \
             --pattern "nextbsd-contrib-pkg-amd64.tar.gz" --dir art/tool --clobber
-      - name: pkg update + resolve NextBSD-everything (VM)
+      - name: pkg update + resolve NextBSD-server (VM)
         uses: vmactions/freebsd-vm@v1
         with:
           # 15.1, as for the package job: NextBSD's pkg-static is built

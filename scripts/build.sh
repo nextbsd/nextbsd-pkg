@@ -1,7 +1,8 @@
 #!/bin/sh
 # build.sh — runs INSIDE the FreeBSD VM (vmactions). Repackages the component
 # `continuous` artifacts for ${ARCH} into one pkg(8) package each (named after
-# the source repo), plus a NextBSD-everything meta, into a FLAT repo (out/repo/).
+# the source repo), plus the NextBSD-server, NextBSD-everything (transitional) and
+# NextBSD-desktop metas, into a FLAT repo (out/repo/).
 #
 # Arch-aware: both arches get every package. The kext SETS differ (arm64
 # ships the drm core + virtio-gpu trio; amd64 adds Intel/AMD/Radeon/
@@ -198,14 +199,14 @@ echo "=== NextBSD-bootloader: /boot from the base artifact ==="
 mkpkg NextBSD-bootloader stage/bootloader "NextBSD boot loader" ""
 
 # --- 1b. NextBSD-bootloader-gershwin: the grey boot splash (nextbsd-pkg#45, E19 B2) ---
-# Data only, written here like NextBSD-everything's SystemVersion.plist. It
+# Data only, written here like NextBSD-server's SystemVersion.plist. It
 # ships exactly one file, /boot/loader.conf.d/bootsplash.conf, which sets the
 # loader's bootsplash_style to grey (#5F6770 background, dark spinner); without
 # it the style is the built-in black. It must stay the ONLY file anywhere that
 # sets bootsplash_style: the loader reads loader.conf.d in unsorted readdir
 # order (config.lua), so a second setter would race it. Base nextbsd.conf
 # (nextbsd-overlays) never sets it. Gershwin images install this package by
-# name; it is optional and NOT in NextBSD-everything. `pkg delete` reverts to
+# name; it is optional and NOT in NextBSD-server. `pkg delete` reverts to
 # black on the next boot.
 mkdir -p stage/bootloader-gershwin/boot/loader.conf.d
 printf 'bootsplash_style="grey"\n' > stage/bootloader-gershwin/boot/loader.conf.d/bootsplash.conf
@@ -265,7 +266,7 @@ check_kext_build_ids() {
 # no_mesa_x_llvm <package>: a kext package MUST stay free of Mesa, X and LLVM. pkg
 # resolves shlibs_required against every package's shlibs_provided, so a
 # libgbm.so.1 (or libX11/libXext/libdrm) left in shlibs_required would make
-# `pkg install NextBSD-everything` pull NextBSD-mesa (or X) in. Fail the build
+# `pkg install NextBSD-server` pull NextBSD-mesa (or X) in. Fail the build
 # instead of shipping that.
 no_mesa_x_llvm() {
   _pkg=$(ls out/repo/"$1"-[0-9]*.pkg 2>/dev/null | head -1)
@@ -363,7 +364,7 @@ if [ -f art/nvidia/nvidia-kexts-amd64.tar.gz ]; then
   # The NVIDIA userland bundle's GLX and GBM libraries link libX11, libXext,
   # libdrm and libgbm. Those come from NextBSD-xlibs, -displayserver-support
   # and -mesa, and pkg would pull them in through shlibs_required, putting X
-  # and Mesa into NextBSD-everything (still open, nextbsd#571). The bundle's X
+  # and Mesa into NextBSD-server (still open, nextbsd#571). The bundle's X
   # and GBM halves are only used once X or Mesa is installed, and installing
   # NextBSD-xlibre (or NextBSD-mesa) brings these libraries, so the package
   # doesn't require them. libgbm.so.1 used to be bundled so pkg saw it as
@@ -396,7 +397,7 @@ repkg NextBSD-contrib contrib "NextBSD third-party base programs" NextBSD-freebs
 # --- 6-9. Display server stack (E23 nextbsd#561, E25 nextbsd#583) ---
 # One package per repo (E23 D13), each repackaged as is. Dependencies are the
 # artifacts' ELF NEEDED entries matched to the files the other artifacts ship.
-# None of these is in NextBSD-everything: that is still open (nextbsd#571,
+# None of these is in NextBSD-server: that is still open (nextbsd#571,
 # E23 step 16), so images add them by name.
 #
 # /etc belongs to nextbsd-overlays (pkg#25): /etc/fonts, /etc/xkb,
@@ -468,7 +469,7 @@ done
 # --- 10-12. E24 (nextbsd#574): GNUstep/Gershwin requirements + the toolchain ---
 # Gershwin builds and installs GNUstep itself into /System (D10); NextBSD ships
 # only what it needs, in /usr and /usr/X11. None of these three is in
-# NextBSD-everything: Gershwin images list them in Gershwin's nextbsd.txt, and
+# NextBSD-server: Gershwin images list them in Gershwin's nextbsd.txt, and
 # NextBSD-toolchain in particular is installed by default on Gershwin images
 # only (D11). Repackaged verbatim: the artifacts carry no /etc (CUPS's config,
 # PAM stack and accounts come from nextbsd-overlays), no /usr/local and no
@@ -497,6 +498,31 @@ repkg NextBSD-printing-support printing "NextBSD printing support (CUPS)" \
 repkg NextBSD-toolchain toolchain "NextBSD developer toolchain" \
   NextBSD-freebsd-compat NextBSD-userland
 
+# --- 12b. NextBSD-gnustep: the GNUstep core (nextbsd/nextbsd#674, E47) ---
+# nextbsd-gnustep cross-builds NextBSD's forks of tools-make, libobjc2,
+# libs-base, libs-corebase, libs-gui, libs-back and libs-av for each arch and
+# publishes the staged install, rooted at /, as nextbsd-gnustep-<arch>.tar.gz.
+# Everything in it is under /System/Library (the gershwin layout, SYSTEM
+# domain): Libraries, Headers, Frameworks, Makefiles, Tools, Bundles, the
+# GSSpeechServer in CoreServices, Preferences/GNUstep.conf and the build's
+# Preferences/nextbsd-gnustep-BUILD-INFO. Its SDK artifact
+# (nextbsd-gnustep-sdk-<arch>) is for cross-compiling only and is not
+# packaged. rtld finds /System/Library/Libraries through the userland's
+# ldconfig paths. Repackaged as is.
+#
+# Dependencies are its ELF NEEDED entries: libc and friends from the compat
+# base; libdispatch, the blocks runtime, ICU, libxml2, libxslt, libffi,
+# libcurl and libdns_sd from the userland; freetype and fontconfig from
+# displayserver-support; libX11 and the other X client libraries from xlibs;
+# cairo, the image formats, GnuTLS, sound, flite and FFmpeg from
+# gnustep-support; libcups (GSCUPS.bundle) from printing-support; libGL.so.1
+# (libs-back's X11 server bundle and gpbs) from mesa-x11, which brings
+# NextBSD-mesa. The same set as the sysroot nextbsd-gnustep builds against.
+# The stage is gnustep-core: stage/gnustep is NextBSD-gnustep-support's.
+repkg NextBSD-gnustep gnustep-core "NextBSD GNUstep" \
+  NextBSD-freebsd-compat NextBSD-userland NextBSD-displayserver-support NextBSD-xlibs \
+  NextBSD-gnustep-support NextBSD-printing-support NextBSD-mesa-x11
+
 # --- 13. pkg: NextBSD's own pkg(8) (pkg#19) ---
 # Built by nextbsd-contrib from its frozen pkg 2.8.4 with the NextBSD patches
 # (src/pkg, NEXTBSD.md): pkg comes only from the repository named NextBSD; a
@@ -513,18 +539,64 @@ PKGVER=$(sed -n 's/^Version: *//p' tool/pc/usr/libdata/pkgconfig/pkg.pc)
 repkg -a nextbsd-contrib-pkg -v "$PKGVER" pkg pkg "NextBSD package manager" \
   NextBSD-freebsd-compat
 
-# --- 14. NextBSD-everything (meta: installs the whole OS for this arch) ---
-# The display stack (nextbsd#571 is still open) and the E24 packages (D11;
-# Gershwin's nextbsd.txt) are deliberately not in it.
+# --- 14. Meta-packages: NextBSD-server, NextBSD-everything, NextBSD-desktop ---
+# nextbsd/nextbsd#680 (E47):
+#   NextBSD-server      the core OS, what NextBSD-everything installed until
+#                       now; the Server Preview images install it.
+#   NextBSD-everything  transitional and empty: it depends on NextBSD-server,
+#                       so `pkg upgrade` on a machine that has it moves to
+#                       NextBSD-server. Removed after the transition.
+#   NextBSD-desktop     NextBSD-server, NextBSD-gnustep and the desktop
+#                       (14c); the Desktop Preview images install it.
+# The display stack (nextbsd#571) and the E24 packages (D11; Gershwin's
+# nextbsd.txt) are deliberately not in NextBSD-server.
 #
+# metapkg <name> <comment> <desc> <vital: yes|no> <metadir> <stage-or-empty>
+#   Writes <metadir>/+MANIFEST (the snapshot version, the NextBSD stamp, the
+#   deps block from stdin) and creates the package. A <stage> is packaged with
+#   every file in it, as mkpkg does; with none the package has no files.
+#   pkg create -m reads the metadata directory, so a pkg-post-install.lua
+#   already in <metadir> goes in too.
+metapkg() {
+  _mname=$1; _mcomment=$2; _mdesc=$3; _mvital=$4; _mdir=$5; _mstage=$6
+  {
+    echo "name: ${_mname}"
+    echo "origin: nextbsd/${_mname}"
+    echo "version: \"${VER}\""
+    echo "comment: \"${_mcomment}\""
+    echo "desc: \"${_mdesc}\""
+    echo "maintainer: \"dev@nextbsd.org\""
+    echo "www: \"https://nextbsd.org\""
+    echo "prefix: \"/\""
+    if [ "$_mvital" = yes ]; then
+      echo "${NBMARK}"
+    else
+      echo "${NBMARK}" | grep -v '^vital:'
+    fi
+    cat
+  } > "${_mdir}/+MANIFEST"
+  if [ -n "$_mstage" ]; then
+    ( cd "$_mstage" && find . \( -type f -o -type l \) | sed 's#^\.##' ) | sort > "${_mdir}.plist"
+    env ABI="${ABI}" OSVERSION="${NBOSVERSION}" \
+      $NBPKG create -m "${_mdir}" -p "${_mdir}.plist" -r "${_mstage}" -o out/repo
+  else
+    env ABI="${ABI}" OSVERSION="${NBOSVERSION}" \
+      $NBPKG create -m "${_mdir}" -o out/repo
+  fi
+  echo "=== ${_mname} (meta): depends on $($NBPKG query -F out/repo/"${_mname}-${VER}".pkg '%dn' | sort | tr '\n' ' ')==="
+}
+
+# --- 14a. NextBSD-server (meta: the core OS for this arch) ---
 # It owns one file, Darwin's /System/Library/CoreServices/SystemVersion.plist
 # (nextbsd/nextbsd#536): the installed OS's name, version and build, so every
-# `pkg upgrade` of NextBSD-everything moves it with the packages. sw_vers(1)
+# `pkg upgrade` of NextBSD-server moves it with the packages. sw_vers(1)
 # (nextbsd-userland), nextbsd-version and /etc/os-release (the login banner's
 # source) read it. The keys are Darwin's; NBSDBuildDate is NextBSD's, named
-# like the kexts' NBSDKernelBuildID.
-mkdir -p stage/everything/System/Library/CoreServices
-cat > stage/everything/System/Library/CoreServices/SystemVersion.plist <<PLIST
+# like the kexts' NBSDKernelBuildID. NextBSD-everything owned it until
+# nextbsd/nextbsd#680; NextBSD-desktop requires NextBSD-server, so a desktop
+# system has it too.
+mkdir -p stage/server/System/Library/CoreServices
+cat > stage/server/System/Library/CoreServices/SystemVersion.plist <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -542,19 +614,19 @@ cat > stage/everything/System/Library/CoreServices/SystemVersion.plist <<PLIST
 </dict>
 </plist>
 PLIST
-chown -R 0:0 stage/everything
-chmod 0644 stage/everything/System/Library/CoreServices/SystemVersion.plist
+chown -R 0:0 stage/server
+chmod 0644 stage/server/System/Library/CoreServices/SystemVersion.plist
 #
 # /etc/os-release follows the plist. It is not package-owned (it lives in the
-# admin's /etc), so NextBSD-everything regenerates it from the plist in a Lua
+# admin's /etc), so NextBSD-server regenerates it from the plist in a Lua
 # post-install script, which pkg runs on every install and every upgrade of
 # this package. pkg runs Lua scripts in-process against the install root
 # (pkg -r included, so the cross-arch image build in nextbsd works too), and
 # its io.open/os.rename resolve paths beneath that root. Without an /etc in
 # the root (install-test.sh's scratch root) it does nothing. nextbsd's
 # build.sh writes the same lines for a fresh image.
-rm -rf /tmp/everything-meta; mkdir -p /tmp/everything-meta
-cat > /tmp/everything-meta/pkg-post-install.lua <<'LUA'
+SERVERMETA=$(mktemp -d /tmp/server-meta.XXXXXX)
+cat > "$SERVERMETA/pkg-post-install.lua" <<'LUA'
 -- Regenerate /etc/os-release from SystemVersion.plist (nextbsd/nextbsd#536).
 local plist = "/System/Library/CoreServices/SystemVersion.plist"
 local f = io.open(plist, "r")
@@ -566,7 +638,7 @@ if f ~= nil then
   end
   local name, ver, build = key("ProductName"), key("ProductVersion"), key("ProductBuildVersion")
   if name == nil or ver == nil or build == nil then
-    pkg.print_msg("NextBSD-everything: " .. plist .. " has no version; /etc/os-release is unchanged")
+    pkg.print_msg("NextBSD-server: " .. plist .. " has no version; /etc/os-release is unchanged")
   else
     local out = io.open("/etc/os-release.new", "w")
     if out ~= nil then
@@ -585,15 +657,6 @@ if f ~= nil then
 end
 LUA
 {
-  echo "name: NextBSD-everything"
-  echo "origin: nextbsd/NextBSD-everything"
-  echo "version: \"${VER}\""
-  echo "comment: \"The complete NextBSD system\""
-  echo "desc: \"Installs the complete NextBSD ${ARCH} OS snapshot ${VER}.\""
-  echo "maintainer: \"dev@nextbsd.org\""
-  echo "www: \"https://nextbsd.org\""
-  echo "prefix: \"/\""
-  echo "${NBMARK}"
   echo "deps: {"
   echo "  NextBSD-freebsd-compat: { origin: \"nextbsd/NextBSD-freebsd-compat\", version: \"${VER}\" }"
   echo "  NextBSD-bootloader: { origin: \"nextbsd/NextBSD-bootloader\", version: \"${VER}\" }"
@@ -605,14 +668,64 @@ LUA
   echo "  NextBSD-kernel-extensions: { origin: \"nextbsd/NextBSD-kernel-extensions\", version: \"${VER}\" }"
   [ "$HAVE_NVIDIA" = 1 ] && echo "  NextBSD-kernel-extensions-nvidia: { origin: \"nextbsd/NextBSD-kernel-extensions-nvidia\", version: \"${VER}\" }"
   echo "}"
-} > /tmp/everything-meta/+MANIFEST
-echo /System/Library/CoreServices/SystemVersion.plist > /tmp/plist
-# -m: a metadata directory, so pkg create picks up pkg-post-install.lua beside
-# the +MANIFEST.
-env ABI="${ABI}" OSVERSION="${NBOSVERSION}" \
-  $NBPKG create -m /tmp/everything-meta -p /tmp/plist -r stage/everything -o out/repo
-echo "=== NextBSD-everything: SystemVersion.plist ==="
-$NBPKG query -F out/repo/NextBSD-everything-"${VER}".pkg '%n %v: %Fp'
+} | metapkg NextBSD-server "NextBSD server" \
+      "Installs the NextBSD ${ARCH} server system, snapshot ${VER}: base, boot loader, kernel, kernel extensions, userland, contrib and pkg." \
+      yes "$SERVERMETA" stage/server
+echo "=== NextBSD-server: SystemVersion.plist ==="
+$NBPKG query -F out/repo/NextBSD-server-"${VER}".pkg '%n %v: %Fp'
+
+# --- 14b. NextBSD-everything (transitional, empty; nextbsd/nextbsd#680) ---
+# Machines installed before #680 have NextBSD-everything. Its new version has
+# no files and depends only on NextBSD-server, at the same snapshot version,
+# so `pkg upgrade` upgrades it and installs NextBSD-server in one
+# transaction, and every package the old one depended on stays: NextBSD-server
+# depends on each of them. SystemVersion.plist moves from NextBSD-everything
+# to NextBSD-server in that transaction: pkg finds the new NextBSD-server
+# conflicting with the installed NextBSD-everything on it and splits the
+# upgrade, deinstalling the old NextBSD-everything first, then installing
+# NextBSD-server (whose post-install script rewrites /etc/os-release) and
+# the empty NextBSD-everything last, so the plist is never deleted after
+# NextBSD-server wrote it. install-test.sh upgrades from the published repo
+# to check this on every run.
+#
+# It is not vital, as the README's retiring a vital package asks, so a user
+# can `pkg delete NextBSD-everything` now; NextBSD-server and everything under
+# it stay vital (pkg marks NextBSD-server automatic on an upgraded machine,
+# and pkg autoremove leaves vital packages). After the transition it is
+# dropped from the repo.
+EVERYTHINGMETA=$(mktemp -d /tmp/everything-meta.XXXXXX)
+deps NextBSD-server | metapkg NextBSD-everything "NextBSD (transitional)" \
+  "Transitional package: NextBSD-everything is now NextBSD-server, which this installs. It has no files and will be removed." \
+  no "$EVERYTHINGMETA" ""
+
+# --- 14c. NextBSD-desktop-apps and NextBSD-desktop (nextbsd/nextbsd#676) ---
+# nextbsd-desktop (nextbsd/nextbsd#675) cross-builds the whole desktop
+# against nextbsd-gnustep's SDK: WindowServer, loginwindow, Workspace and the
+# Dock in /System/Library/CoreServices; Terminal, the settings apps,
+# Software, Update and Installer in /System/Applications; the InnerSpace
+# modules and the NextBSD theme in /System/Library. Its build,
+# nextbsd-desktop-<arch>.tar.gz, is repackaged as is into
+# NextBSD-desktop-apps. NextBSD-desktop is the meta-package the Desktop
+# Preview images install: NextBSD-server, NextBSD-gnustep and
+# NextBSD-desktop-apps.
+#
+# Until nextbsd-desktop publishes, the workflow finds no artifact and neither
+# package is built: the run goes on without them. NextBSD-desktop-apps depends
+# on what its libraries come from by name (the compat base, the userland,
+# NextBSD-gnustep); pkg create records every NEEDED entry as shlibs_required,
+# which pkg resolves against the repo, so anything else it links (Mesa, for
+# instance) is pulled in too. Once the artifact exists, name those here like
+# the other packages.
+if [ -f "art/nextbsd-desktop-${ARCH}.tar.gz" ]; then
+  repkg -a nextbsd-desktop NextBSD-desktop-apps desktop "NextBSD desktop apps" \
+    NextBSD-freebsd-compat NextBSD-userland NextBSD-gnustep
+  DESKTOPMETA=$(mktemp -d /tmp/desktop-meta.XXXXXX)
+  deps NextBSD-server NextBSD-gnustep NextBSD-desktop-apps | metapkg NextBSD-desktop "NextBSD desktop" \
+    "Installs the NextBSD ${ARCH} desktop, snapshot ${VER}: NextBSD-server, GNUstep and the desktop apps." \
+    yes "$DESKTOPMETA" ""
+else
+  echo "=== no art/nextbsd-desktop-${ARCH}.tar.gz (nextbsd-desktop has not published) — skipping NextBSD-desktop-apps and NextBSD-desktop ==="
+fi
 
 # --- Layer A (nextbsd#370): fail if any two component packages co-own a path,
 #     BEFORE cataloging/publishing. Fast + deterministic; names the culprit. ---

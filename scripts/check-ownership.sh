@@ -11,9 +11,12 @@
 set -eu
 
 # Every component stage dir build.sh created (one per package), so a new
-# package is covered with no change here. That includes stage/everything: the
-# meta owns /System/Library/CoreServices/SystemVersion.plist
-# (nextbsd/nextbsd#536), which no other package may ship.
+# package is covered with no change here. That includes stage/server:
+# NextBSD-server owns /System/Library/CoreServices/SystemVersion.plist
+# (nextbsd/nextbsd#536, #680), which no other package may ship; and
+# stage/gnustep-core (NextBSD-gnustep) and stage/desktop (NextBSD-desktop-apps),
+# which install under /System/Library and /System/Applications. The
+# transitional NextBSD-everything and NextBSD-desktop own no files.
 comps=$(cd stage && for d in *; do [ -d "$d" ] && echo "$d"; done | tr '\n' ' ')
 [ -n "$comps" ] || { echo "FATAL: no component stage dirs under stage/ (build.sh did not run?)" >&2; exit 1; }
 
