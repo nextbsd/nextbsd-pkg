@@ -195,7 +195,7 @@ mkdir -p stage/bootloader
 mv stage/compat/boot stage/bootloader/boot
 echo "=== NextBSD-bootloader: /boot from the base artifact ==="
 ( cd stage/bootloader && find . \( -type f -o -type l \) | sort )
-mkpkg NextBSD-bootloader stage/bootloader "NextBSD boot loader (loader, its Lua, defaults, images, fonts and boot blocks)" ""
+mkpkg NextBSD-bootloader stage/bootloader "NextBSD boot loader" ""
 
 # --- 1b. NextBSD-bootloader-gershwin: the grey boot splash (nextbsd-pkg#45, E19 B2) ---
 # Data only, written here like NextBSD-everything's SystemVersion.plist. It
@@ -211,9 +211,9 @@ mkdir -p stage/bootloader-gershwin/boot/loader.conf.d
 printf 'bootsplash_style="grey"\n' > stage/bootloader-gershwin/boot/loader.conf.d/bootsplash.conf
 chown -R 0:0 stage/bootloader-gershwin
 chmod 0644 stage/bootloader-gershwin/boot/loader.conf.d/bootsplash.conf
-mkpkg NextBSD-bootloader-gershwin stage/bootloader-gershwin "NextBSD grey boot splash style for Gershwin (bootsplash_style=grey)" "$(dep NextBSD-bootloader)"
+mkpkg NextBSD-bootloader-gershwin stage/bootloader-gershwin "NextBSD grey boot splash for Gershwin" "$(dep NextBSD-bootloader)"
 
-mkpkg NextBSD-freebsd-compat stage/compat "NextBSD base (libc, libs, PAM, login, command suites)" ""
+mkpkg NextBSD-freebsd-compat stage/compat "NextBSD base system" ""
 
 # --- 2. NextBSD-kernel (just the stripped kernel binary from the obj tree) ---
 mkdir -p stage/kernel/boot/kernel
@@ -224,7 +224,7 @@ mkdir -p /tmp/kx
 tar -C /tmp/kx -xzf "art/nextbsd-kernel-${ARCH}.tar.gz" "$KPATH"
 cp "/tmp/kx/$KPATH" stage/kernel/boot/kernel/kernel
 chmod 555 stage/kernel/boot/kernel/kernel
-mkpkg NextBSD-kernel stage/kernel "NextBSD kernel (Mach + Darwin glue baked in)" ""
+mkpkg NextBSD-kernel stage/kernel "NextBSD kernel" ""
 
 # The kernel's KERNEL-BUILD-ID: its kext ABI version, e.g. 27.0 (nextbsd-kernel#376; it was <commit>.<run_id>.<run_attempt> under #326),
 # from the same tarball. Every kext packaged below must have been built for it.
@@ -300,14 +300,9 @@ if ls stage/kexts/System/Library/Extensions/*.kext >/dev/null 2>&1; then
   chown -R 0:0 stage/kexts
   find stage/kexts/System/Library/Extensions -maxdepth 1 \( -name '*.kext' -o -name '*.bundle' \) -exec chmod -R go-w {} +
   echo "=== staged kexts ==="; ls -1 stage/kexts/System/Library/Extensions
-  # Comment is arch-accurate: arm64 carries only the drm core + virtio-gpu.
   # The Intel NIC/WiFi kexts are in NextBSD-kernel-extensions (3a) and NVIDIA in
   # its own package (3b).
-  case "$ARCH" in
-    amd64) KXCOMMENT="NextBSD graphics kernel extensions (drm graphics + virtio-gpu kexts/firmware)" ;;
-    *)     KXCOMMENT="NextBSD graphics kernel extensions (drm graphics core + virtio-gpu kexts)" ;;
-  esac
-  mkpkg NextBSD-kernel-extensions-graphics stage/kexts "$KXCOMMENT" "$(dep NextBSD-kernel)"
+  mkpkg NextBSD-kernel-extensions-graphics stage/kexts "NextBSD graphics kernel extensions" "$(dep NextBSD-kernel)"
   no_mesa_x_llvm NextBSD-kernel-extensions-graphics
   HAVE_KEXTS=1
 else
@@ -328,12 +323,11 @@ if [ -f "art/freebsd/freebsd-kexts-${ARCH}.tar.gz" ]; then
   chown -R 0:0 stage/freebsd
   find stage/freebsd/System/Library/Extensions -maxdepth 1 -name '*.kext' -exec chmod -R go-w {} +
   echo "=== staged nextbsd-kernel-extensions kexts ==="; ls -1 stage/freebsd/System/Library/Extensions
-  FKCOMMENT="NextBSD kernel extensions ($(cd stage/freebsd/System/Library/Extensions && ls -d *.kext | sed 's/\.kext$//' | paste -sd, - | sed 's/,/, /g'))"
 else
   echo "ERROR: no freebsd-kexts-${ARCH}.tar.gz from nextbsd-kernel-extensions" >&2
   exit 1
 fi
-mkpkg NextBSD-kernel-extensions stage/freebsd "$FKCOMMENT" "$(dep NextBSD-kernel)"
+mkpkg NextBSD-kernel-extensions stage/freebsd "NextBSD kernel extensions" "$(dep NextBSD-kernel)"
 no_mesa_x_llvm NextBSD-kernel-extensions
 
 # --- 3b. NextBSD-kernel-extensions-nvidia (amd64; nextbsd-kernel-extensions-nvidia) ---
@@ -377,7 +371,7 @@ if [ -f art/nvidia/nvidia-kexts-amd64.tar.gz ]; then
   # (nextbsd-kernel-extensions-nvidia#2).
   KXIGNORE='shlibs_required_ignore: [ "libX11.so.6", "libXext.so.6", "libdrm.so.2", "libgbm.so.1" ]'
   mkpkg NextBSD-kernel-extensions-nvidia stage/nvidia \
-    "NextBSD NVIDIA kernel extensions (NVIDIAGraphics595 + modeset/core kexts, GSP firmware, NVIDIA595 userland bundle)" \
+    "NextBSD NVIDIA graphics kernel extensions" \
     "$(dep NextBSD-kernel-extensions-graphics)
 ${KXIGNORE}"
   no_mesa_x_llvm NextBSD-kernel-extensions-nvidia
@@ -390,14 +384,14 @@ fi
 # --- 4. NextBSD-userland (Darwin Tier 0-2 runtime + daemons) ---
 mkdir -p stage/userland
 tar -C stage/userland -xzf "art/nextbsd-userland-${ARCH}.tar.gz"
-mkpkg NextBSD-userland stage/userland "NextBSD Darwin/Mach userland (Mach, launchd, libdispatch, CoreFoundation, configd, IOKit + daemons)" "$(dep2 NextBSD-freebsd-compat NextBSD-kernel)"
+mkpkg NextBSD-userland stage/userland "NextBSD Darwin userland" "$(dep2 NextBSD-freebsd-compat NextBSD-kernel)"
 
 # --- 5. NextBSD-contrib (third-party base programs: sudo, zsh, pico) ---
 # Built by nextbsd-contrib against the compat base only, so it depends on
 # NextBSD-freebsd-compat alone. Repackaged verbatim: the tarball carries the
 # modes the build staged, including setuid on /usr/bin/sudo (tar as root keeps
 # it, and pkg create records it).
-repkg NextBSD-contrib contrib "NextBSD third-party base programs (sudo, zsh, pico)" NextBSD-freebsd-compat
+repkg NextBSD-contrib contrib "NextBSD third-party base programs" NextBSD-freebsd-compat
 
 # --- 6-9. Display server stack (E23 nextbsd#561, E25 nextbsd#583) ---
 # One package per repo (E23 D13), each repackaged as is. Dependencies are the
@@ -430,13 +424,13 @@ repkg NextBSD-contrib contrib "NextBSD third-party base programs (sudo, zsh, pic
 #    mtdev, libinput and the linux-input shim, plus the org.nextbsd.fc-cache
 #    LaunchDaemon. libudev links libIOKit, CoreFoundation and libdispatch from
 #    the userland.
-repkg NextBSD-displayserver-support displayserver "NextBSD display server support (libdrm, pixman, freetype, fontconfig, libxkbcommon, libinput, IOKit libudev)" \
+repkg NextBSD-displayserver-support displayserver "NextBSD display server support libraries" \
   NextBSD-freebsd-compat NextBSD-userland
 
 # 7. NextBSD-xlibs: the X client libraries in /usr/X11, plus libxkbcommon-x11
 #    (E25 D5). libXft and libXfont2 link freetype and fontconfig, and
 #    libxkbcommon-x11 links libxkbcommon, from displayserver-support.
-repkg NextBSD-xlibs xlibs "NextBSD X client libraries in /usr/X11 (libX11, libxcb, libXext, libXft, libxkbcommon-x11, ...)" \
+repkg NextBSD-xlibs xlibs "NextBSD X11 client libraries" \
   NextBSD-freebsd-compat NextBSD-displayserver-support
 
 # 8. NextBSD-mesa: nextbsd-mesa's X-free core artifact in /usr/X11: libglvnd's
@@ -444,7 +438,7 @@ repkg NextBSD-xlibs xlibs "NextBSD X client libraries in /usr/X11 (libX11, libxc
 #    with LLVM linked statically, no libLLVM; libEGL_mesa_core, libgbm,
 #    dri_gbm, the DRI drivers) and GLU. Links libdrm and expat from
 #    displayserver-support and nothing from xlibs (nextbsd-mesa#10, pkg#34).
-repkg NextBSD-mesa mesa "NextBSD OpenGL, EGL and GBM in /usr/X11 (libglvnd, Mesa, GLU; no X)" \
+repkg NextBSD-mesa mesa "NextBSD OpenGL, EGL and GBM (Mesa)" \
   NextBSD-freebsd-compat NextBSD-displayserver-support
 
 # 8b. NextBSD-mesa-x11: nextbsd-mesa's X artifact (nextbsd-mesa-x11-<arch>):
@@ -452,7 +446,7 @@ repkg NextBSD-mesa mesa "NextBSD OpenGL, EGL and GBM in /usr/X11 (libglvnd, Mesa
 #     (libEGL_mesa, 50_mesa.json), libglvnd's libGL and libGLX, the GLX
 #     headers, gl.pc and glx.pc. They run against NextBSD-mesa's libgallium
 #     and link the X client libraries.
-repkg NextBSD-mesa-x11 mesa-x11 "NextBSD Mesa X11 parts in /usr/X11 (GLX, libGL, the X11 EGL vendor)" \
+repkg NextBSD-mesa-x11 mesa-x11 "NextBSD Mesa X11 support" \
   NextBSD-freebsd-compat NextBSD-mesa NextBSD-xlibs
 
 # 9. NextBSD-xlibre: the XLibre 25.1.9 server, drivers (vesa and vmmouse on
@@ -461,7 +455,7 @@ repkg NextBSD-mesa-x11 mesa-x11 "NextBSD Mesa X11 parts in /usr/X11 (GLX, libGL,
 #    the empty /var/db/xkb for compiled keymaps. The input stack and xkb data
 #    come from displayserver-support. glamor and GLX (libglamoregl.so,
 #    extensions/libglx.so) link libGL.so.1 from NextBSD-mesa-x11.
-repkg NextBSD-xlibre xlibre "NextBSD X server (XLibre 25.1.9, drivers and tools in /usr/X11)" \
+repkg NextBSD-xlibre xlibre "NextBSD X server (XLibre)" \
   NextBSD-freebsd-compat NextBSD-displayserver-support NextBSD-xlibs NextBSD-mesa NextBSD-mesa-x11 \
   -- /var/db/xkb
 
@@ -488,19 +482,19 @@ done
 #     (in /usr/X11), libsndfile + libao, SQLite, flite, FFmpeg. cairo links
 #     libX11, libxcb and libXrender from xlibs, and pixman, freetype and
 #     fontconfig from displayserver-support.
-repkg NextBSD-gnustep-support gnustep "NextBSD GNUstep support libraries (image formats, GnuTLS, cairo, sound, SQLite, flite, FFmpeg)" \
+repkg NextBSD-gnustep-support gnustep "NextBSD GNUstep support libraries" \
   NextBSD-freebsd-compat NextBSD-displayserver-support NextBSD-xlibs
 
 # 11. NextBSD-printing-support: Apple's CUPS. GnuTLS comes from
 #     gnustep-support; liblaunch (launch_activate_socket) and libdns_sd from
 #     the userland. The compat base drops the BSD LPD suite that CUPS's lp,
 #     lpr, lpq, lprm and lpc replace (nextbsd-freebsd-compat scripts/superseded).
-repkg NextBSD-printing-support printing "NextBSD printing support (Apple's CUPS)" \
+repkg NextBSD-printing-support printing "NextBSD printing support (CUPS)" \
   NextBSD-freebsd-compat NextBSD-userland NextBSD-gnustep-support
 
 # 12. NextBSD-toolchain: on-machine clang/lld 19.1.7, LLVM binutils, gmake,
 #     pkgconf and Apple's Git (client only; libcurl from the userland).
-repkg NextBSD-toolchain toolchain "NextBSD on-machine toolchain (clang/lld 19.1.7, gmake, pkgconf, Git, CMake, autotools)" \
+repkg NextBSD-toolchain toolchain "NextBSD developer toolchain" \
   NextBSD-freebsd-compat NextBSD-userland
 
 # --- 13. pkg: NextBSD's own pkg(8) (pkg#19) ---
@@ -516,7 +510,7 @@ mkdir -p tool/pc
 tar -C tool/pc -xzf "art/nextbsd-contrib-pkg-${ARCH}.tar.gz" ./usr/libdata/pkgconfig/pkg.pc
 PKGVER=$(sed -n 's/^Version: *//p' tool/pc/usr/libdata/pkgconfig/pkg.pc)
 [ -n "$PKGVER" ] || { echo "ERROR: no Version: in the contrib pkg artifact's pkg.pc" >&2; exit 1; }
-repkg -a nextbsd-contrib-pkg -v "$PKGVER" pkg pkg "NextBSD's pkg(8) package manager (pkg only from the NextBSD repository)" \
+repkg -a nextbsd-contrib-pkg -v "$PKGVER" pkg pkg "NextBSD package manager" \
   NextBSD-freebsd-compat
 
 # --- 14. NextBSD-everything (meta: installs the whole OS for this arch) ---
@@ -594,7 +588,7 @@ LUA
   echo "name: NextBSD-everything"
   echo "origin: nextbsd/NextBSD-everything"
   echo "version: \"${VER}\""
-  echo "comment: \"NextBSD-everything meta-package (base + bootloader + kernel + userland + contrib + kernel-extensions + pkg$([ "$HAVE_KEXTS" = 1 ] && echo ' + kernel-extensions-graphics')$([ "$HAVE_NVIDIA" = 1 ] && echo ' + NVIDIA'))\""
+  echo "comment: \"The complete NextBSD system\""
   echo "desc: \"Installs the complete NextBSD ${ARCH} OS snapshot ${VER}.\""
   echo "maintainer: \"dev@nextbsd.org\""
   echo "www: \"https://nextbsd.org\""
