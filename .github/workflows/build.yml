@@ -108,6 +108,17 @@ jobs:
           else
             echo "nextbsd-desktop has no nextbsd-desktop-${ARCH}.tar.gz on continuous yet; NextBSD-desktop is skipped"
           fi
+          # loginwindow's PAM service (nextbsd/nextbsd#676): nextbsd-overlays'
+          # copy is the one source. NextBSD-desktop-apps' post-install embeds
+          # it and writes /etc/pam.d/loginwindow where it is missing. Until
+          # nextbsd-overlays has it, build.sh takes the desktop artifact's.
+          if gh api -H "Accept: application/vnd.github.raw" \
+               repos/nextbsd/nextbsd-overlays/contents/rootfs/private/etc/pam.d/loginwindow \
+               > art/overlays-pam.d-loginwindow.download; then
+            mv art/overlays-pam.d-loginwindow.download art/overlays-pam.d-loginwindow
+          else
+            echo "nextbsd-overlays has no rootfs/private/etc/pam.d/loginwindow yet"
+          fi
           # NextBSD's own pkg (pkg#19), built by nextbsd-contrib in its own
           # artifact: packaged as `pkg` for this arch, and the amd64 build's
           # pkg-static (in art/tool/) is what build.sh and install-test.sh
