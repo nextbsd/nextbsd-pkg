@@ -151,10 +151,10 @@ echo "OK (${ARCH}): the transitional NextBSD-everything installs NextBSD-server 
 if ls "$REPO"/NextBSD-desktop-[0-9]*.pkg >/dev/null 2>&1; then
   echo "=== pkg install NextBSD-desktop into the same root (${ARCH}) ==="
   $PKG install -y NextBSD-desktop
-  for p in NextBSD-desktop NextBSD-desktop-apps NextBSD-gnustep NextBSD-server $deps; do
+  for p in NextBSD-desktop NextBSD-desktop-apps NextBSD-gnustep NextBSD-toolchain NextBSD-server $deps; do
     $PKG info -e "$p" || { echo "FAIL: pkg install NextBSD-desktop did not install $p (or removed it)" >&2; exit 1; }
   done
-  echo "OK (${ARCH}): pkg install NextBSD-desktop installs NextBSD-server, NextBSD-gnustep and the desktop apps"
+  echo "OK (${ARCH}): pkg install NextBSD-desktop installs NextBSD-server, NextBSD-gnustep, NextBSD-toolchain and the desktop apps"
   # NextBSD-desktop-apps' post-install: loginwindow's PAM service, and the
   # graphical login enabled in launchd's overrides; its config files.
   OVR="$ROOT/var/db/launchd.db/com.apple.launchd/overrides.plist"

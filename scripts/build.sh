@@ -565,8 +565,10 @@ repkg -a nextbsd-contrib-pkg -v "$PKGVER" pkg pkg "NextBSD package manager" \
 #   NextBSD-everything  transitional and empty: it depends on NextBSD-server,
 #                       so `pkg upgrade` on a machine that has it moves to
 #                       NextBSD-server. Removed after the transition.
-#   NextBSD-desktop     NextBSD-server, NextBSD-gnustep and the desktop
-#                       (14c); the Desktop Preview images install it.
+#   NextBSD-desktop     NextBSD-server, NextBSD-gnustep, the desktop (14c)
+#                       and NextBSD-toolchain (Software.app clones and builds
+#                       apps with git, gmake and clang); the Desktop Preview
+#                       images install it.
 # The display stack (nextbsd#571) and the E24 packages (D11; Gershwin's
 # nextbsd.txt) are deliberately not in NextBSD-server.
 #
@@ -742,8 +744,9 @@ deps NextBSD-server | metapkg NextBSD-everything "NextBSD (transitional)" \
 # None of these paths is shipped by another NextBSD package
 # (check-ownership.sh still checks every run). It is packaged as
 # NextBSD-desktop-apps; NextBSD-desktop is the meta-package the Desktop
-# Preview images install: NextBSD-server, NextBSD-gnustep and
-# NextBSD-desktop-apps. Until nextbsd-desktop publishes, the workflow finds
+# Preview images install: NextBSD-server, NextBSD-gnustep,
+# NextBSD-desktop-apps and NextBSD-toolchain (Software.app builds apps from
+# source: git clone, then gmake with clang against GNUstep's Makefiles). Until nextbsd-desktop publishes, the workflow finds
 # no artifact and neither package is built.
 #
 # Dependencies are the artifact's ELF NEEDED entries: the compat base; the
@@ -966,8 +969,8 @@ LUA
             NextBSD-gnustep)"
   _mconfig= _mscripts=
   DESKTOPMETA=$(mktemp -d /tmp/desktop-meta.XXXXXX)
-  deps NextBSD-server NextBSD-gnustep NextBSD-desktop-apps | metapkg NextBSD-desktop "NextBSD desktop" \
-    "Installs the NextBSD ${ARCH} desktop, snapshot ${VER}: NextBSD-server, GNUstep and the desktop apps." \
+  deps NextBSD-server NextBSD-gnustep NextBSD-desktop-apps NextBSD-toolchain | metapkg NextBSD-desktop "NextBSD desktop" \
+    "Installs the NextBSD ${ARCH} desktop, snapshot ${VER}: NextBSD-server, GNUstep, the desktop apps and the developer toolchain Software.app builds with." \
     yes "$DESKTOPMETA" ""
 else
   echo "=== no art/nextbsd-desktop-${ARCH}.tar.gz (nextbsd-desktop has not published) — skipping NextBSD-desktop-apps and NextBSD-desktop ==="
