@@ -155,6 +155,33 @@ if ls "$REPO"/NextBSD-desktop-[0-9]*.pkg >/dev/null 2>&1; then
     $PKG info -e "$p" || { echo "FAIL: pkg install NextBSD-desktop did not install $p (or removed it)" >&2; exit 1; }
   done
   echo "OK (${ARCH}): pkg install NextBSD-desktop installs NextBSD-server, NextBSD-gnustep and the desktop apps"
+  # NextBSD-desktop-apps' post-install: loginwindow's PAM service, and the
+  # graphical login enabled in launchd's overrides; its config files.
+  OVR="$ROOT/var/db/launchd.db/com.apple.launchd/overrides.plist"
+  for f in /etc/pam.d/loginwindow /System/Library/LaunchDaemons/org.nextbsd.loginwindow.plist \
+           /System/Library/LaunchDaemons/org.nextbsd.WindowServer.plist \
+           /var/db/launchd.db/com.apple.launchd/overrides.plist; do
+    [ -e "$ROOT$f" ] || { echo "FAIL: no $f after pkg install NextBSD-desktop" >&2; exit 1; }
+  done
+  for l in org.nextbsd.WindowServer org.nextbsd.loginwindow; do
+    tr -d ' \t\n' < "$OVR" | grep -q "<key>$l</key><dict><key>Disabled</key><false/></dict>" \
+      || { echo "FAIL: $l is not enabled in $OVR" >&2; cat "$OVR" >&2; exit 1; }
+  done
+  if $PKG query '%Fp' NextBSD-desktop-apps | grep -q '^/etc/'; then
+    echo "FAIL: NextBSD-desktop-apps owns files in /etc (they are nextbsd-overlays'):" >&2
+    $PKG query '%Fp' NextBSD-desktop-apps | grep '^/etc/' >&2; exit 1
+  fi
+  echo "OK (${ARCH}): NextBSD-desktop-apps installed /etc/pam.d/loginwindow (not package-owned) and enabled WindowServer and loginwindow at boot"
+  # Its pre-deinstall takes the overrides out again (vital, hence -f);
+  # /etc/pam.d/loginwindow stays, it is the admin's.
+  $PKG delete -fy NextBSD-desktop NextBSD-desktop-apps
+  for l in org.nextbsd.WindowServer org.nextbsd.loginwindow; do
+    if grep -q "<key>$l</key>" "$OVR"; then echo "FAIL: $l still in $OVR after pkg delete" >&2; cat "$OVR" >&2; exit 1; fi
+  done
+  [ ! -e "$ROOT/System/Library/LaunchDaemons/org.nextbsd.loginwindow.plist" ] \
+    || { echo "FAIL: the loginwindow LaunchDaemon is still there after pkg delete" >&2; exit 1; }
+  [ -e "$ROOT/etc/pam.d/loginwindow" ] || { echo "FAIL: pkg delete removed /etc/pam.d/loginwindow" >&2; exit 1; }
+  echo "OK (${ARCH}): pkg delete NextBSD-desktop-apps disables the graphical login and leaves /etc alone"
 else
   echo "=== no NextBSD-desktop in this repo (nextbsd-desktop has not published); not tested ==="
 fi
@@ -174,7 +201,18 @@ ROOT=$(mktemp -d)
 OPKG="$NBPKGBIN -C $PWD/tool/pkg.conf -R $PUBREPOS -r $ROOT"
 PKG="$NBPKGBIN -C $PWD/tool/pkg.conf -R $REPOS -r $ROOT"
 echo "=== upgrade test: NextBSD-everything from ${PUBURL}, then pkg upgrade from this repo (${ARCH}) ==="
-if $OPKG update -f && $OPKG install -y NextBSD-everything; then
+_newver=$(cd "$REPO" && ls NextBSD-server-*.pkg | sed 's/^NextBSD-server-//; s/\.pkg$//')
+_pubver=
+if $OPKG update -f; then
+  _pubver=$($OPKG rquery -U '%v' NextBSD-everything 2>/dev/null || true)
+fi
+if [ -z "$_pubver" ]; then
+  echo "=== upgrade test skipped: could not read NextBSD-everything from ${PUBURL} ==="
+elif [ "$($NBPKGBIN version -t "$_newver" "$_pubver")" != ">" ]; then
+  # A hand run whose NBBUILD is below the published run number: there is
+  # nothing to upgrade to.
+  echo "=== upgrade test skipped: this repo's ${_newver} is not newer than the published ${_pubver} ==="
+elif $OPKG install -y NextBSD-everything; then
   before=$($OPKG query '%n' | sort)
   echo "before: $(echo "$before" | tr '\n' ' ')"
   $PKG update -f

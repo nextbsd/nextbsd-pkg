@@ -96,10 +96,18 @@ annotations: { \"org.nextbsd.origin\": \"NextBSD\", \"org.nextbsd.build_date\": 
 #   wants OSVERSION whenever ABI is pinned. The manifest names no abi, so pkg
 #   create stamps it from ABI (abi NextBSD:27:<arch>, arch nextbsd:27:...) and
 #   adds the FreeBSD_version annotation from OSVERSION (2700000).
+#   Two optional settings, which the caller clears again afterwards:
+#     _mconfig   paths (no spaces) recorded as @config: pkg keeps a local
+#                change across upgrades (it merges, or leaves the new copy
+#                as <file>.pkgnew) instead of overwriting it.
+#     _mscripts  a metadata directory holding pkg-<when>.lua scripts; the
+#                +MANIFEST is written there and pkg create -m reads both.
 mkpkg() {
   _name=$1; _root=$2; _comment=$3; _deps=$4
   shift 4
-  cat > /tmp/+MANIFEST <<UCL
+  _mf=/tmp/+MANIFEST
+  [ -n "${_mscripts:-}" ] && _mf="${_mscripts}/+MANIFEST"
+  cat > "$_mf" <<UCL
 name: ${_name}
 origin: nextbsd/${_name}
 version: "${_mver:-$VER}"
@@ -110,15 +118,26 @@ www: "https://nextbsd.org"
 prefix: "/"
 ${NBMARK}
 UCL
-  [ -n "${_deps}" ] && printf '%s\n' "${_deps}" >> /tmp/+MANIFEST
+  [ -n "${_deps}" ] && printf '%s\n' "${_deps}" >> "$_mf"
   ( cd "${_root}" && find . \( -type f -o -type l \) | sed 's#^\.##' ) | sort > /tmp/plist
+  for _cf in ${_mconfig:-}; do
+    grep -qxF "${_cf}" /tmp/plist || { echo "ERROR: ${_name}: config file ${_cf} is not in its artifact" >&2; exit 1; }
+    awk -v c="${_cf}" '$0 == c { print "@config " $0; next } { print }' /tmp/plist > /tmp/plist.config
+    mv /tmp/plist.config /tmp/plist
+    echo "    @config ${_cf}"
+  done
   for _dir in "$@"; do
     [ -d "${_root}${_dir}" ] || { echo "ERROR: ${_name}: directory ${_dir} is not in its artifact" >&2; exit 1; }
     echo "@dir ${_dir}" >> /tmp/plist
   done
   echo "=== ${_name}: $(wc -l < /tmp/plist) files ==="
-  env ABI="${ABI}" OSVERSION="${NBOSVERSION}" \
-    $NBPKG create -M /tmp/+MANIFEST -p /tmp/plist -r "${_root}" -o out/repo
+  if [ -n "${_mscripts:-}" ]; then
+    env ABI="${ABI}" OSVERSION="${NBOSVERSION}" \
+      $NBPKG create -m "${_mscripts}" -p /tmp/plist -r "${_root}" -o out/repo
+  else
+    env ABI="${ABI}" OSVERSION="${NBOSVERSION}" \
+      $NBPKG create -M "$_mf" -p /tmp/plist -r "${_root}" -o out/repo
+  fi
 }
 
 dep()  { printf 'deps: { %s: { origin: "nextbsd/%s", version: "%s" } }\n' "$1" "$1" "$VER"; }
@@ -700,25 +719,252 @@ deps NextBSD-server | metapkg NextBSD-everything "NextBSD (transitional)" \
 
 # --- 14c. NextBSD-desktop-apps and NextBSD-desktop (nextbsd/nextbsd#676) ---
 # nextbsd-desktop (nextbsd/nextbsd#675) cross-builds the whole desktop
-# against nextbsd-gnustep's SDK: WindowServer, loginwindow, Workspace and the
-# Dock in /System/Library/CoreServices; Terminal, the settings apps,
-# Software, Update and Installer in /System/Applications; the InnerSpace
-# modules and the NextBSD theme in /System/Library. Its build,
-# nextbsd-desktop-<arch>.tar.gz, is repackaged as is into
-# NextBSD-desktop-apps. NextBSD-desktop is the meta-package the Desktop
+# against nextbsd-gnustep's SDK and publishes nextbsd-desktop-<arch>.tar.gz,
+# rooted at /:
+#   /System/Library/CoreServices  WindowServer, loginwindow, Workspace, the
+#                                 Dock, ScreenCaptureAgent
+#   /System/Applications          Terminal, the settings apps, Software,
+#                                 Update, Installer, XLibre (Xnextbsd)
+#   /System/Library               InnerSpace, DockExtras, the theme, fonts,
+#                                 the nextbsd GNUstep backend bundle, Tools,
+#                                 the WindowServer LaunchDaemon (Disabled)
+#                                 and ScreenCaptureAgent LaunchAgent, and
+#                                 Preferences/org.nextbsd.WindowServer.plist,
+#                                 and (nextbsd-desktop#2) the desktop's
+#                                 system-wide GNUstep defaults in
+#                                 Preferences/GlobalDefaults (GSTheme
+#                                 NextBSD ...; plain package files)
+#   /usr                          libWindowServerClient (lib, headers, .pc),
+#                                 the WindowServer tools in
+#                                 /usr/libexec/WindowServer
+#   /etc/pam.d/loginwindow        loginwindow's PAM service, in builds
+#                                 before nextbsd-desktop#2 (not packaged)
+# None of these paths is shipped by another NextBSD package
+# (check-ownership.sh still checks every run). It is packaged as
+# NextBSD-desktop-apps; NextBSD-desktop is the meta-package the Desktop
 # Preview images install: NextBSD-server, NextBSD-gnustep and
-# NextBSD-desktop-apps.
+# NextBSD-desktop-apps. Until nextbsd-desktop publishes, the workflow finds
+# no artifact and neither package is built.
 #
-# Until nextbsd-desktop publishes, the workflow finds no artifact and neither
-# package is built: the run goes on without them. NextBSD-desktop-apps depends
-# on what its libraries come from by name (the compat base, the userland,
-# NextBSD-gnustep); pkg create records every NEEDED entry as shlibs_required,
-# which pkg resolves against the repo, so anything else it links (Mesa, for
-# instance) is pulled in too. Once the artifact exists, name those here like
-# the other packages.
+# Dependencies are the artifact's ELF NEEDED entries: the compat base; the
+# userland (CoreFoundation, IOKit, SystemConfiguration, liblaunch,
+# libnotify, libdispatch, the blocks runtime); displayserver-support (libdrm,
+# libinput, libudev, libxkbcommon, pixman, freetype, fontconfig); xlibs;
+# mesa (EGL, GLESv2, gbm) and mesa-x11 (libGL); xlibre (libepoxy, for
+# XLibre.app's Xnextbsd); gnustep-support (cairo, png, jpeg);
+# printing-support (libcups); NextBSD-gnustep (libobjc, gnustep-base,
+# gnustep-gui).
+#
+# Configuration, as the rest of NextBSD handles it:
+#   - /etc belongs to nextbsd-overlays, never to a package (pkg#25), so
+#     `pkg upgrade` can't touch an admin's /etc. /etc/pam.d/loginwindow,
+#     loginwindow's PAM service, is in no package's file list. Its one
+#     source is nextbsd-overlays' rootfs/private/etc/pam.d/loginwindow,
+#     which new images get; the workflow downloads it as
+#     art/overlays-pam.d-loginwindow, and its text is embedded in the
+#     post-install script, which writes /etc/pam.d/loginwindow only where
+#     it is missing (seed.sh's rule), so a system from an older image can
+#     log in graphically too. An existing file, edited or not, is never
+#     replaced, and pkg delete leaves it. Until nextbsd-overlays has the
+#     file, the desktop artifact's own copy (builds before
+#     nextbsd-desktop#2) is used; the artifact's /etc is never packaged.
+#   - /System/Library/Preferences/org.nextbsd.WindowServer.plist is under
+#     /System, which packages own, but it holds the WindowServer's
+#     system-wide settings (keyboard layout, touchpad) for the admin to
+#     edit, so it is an @config file: an upgrade keeps a local change.
+#   - /System/Library/Preferences/GlobalDefaults/*.plist (GSTheme NextBSD,
+#     ...) are plain package files that update with the desktop: libs-base
+#     merges them below each user's NSGlobalDomain, so users override them
+#     in their own defaults, and an admin with a GlobalDefaults.plist beside
+#     them (merged after the folder).
+#
+# Booting into the desktop, as pkgdemon/nextbsd-gnustep's
+# enable-loginwindow.sh does it: WindowServer's LaunchDaemon ships Disabled
+# and is enabled in launchd's overrides database (what `launchctl load -w`
+# records); loginwindow's LaunchDaemon plist ships in loginwindow.app and
+# goes into /System/Library/LaunchDaemons, where an org.nextbsd.loginwindow
+# job tells getty to leave ttyv0 to the graphical login. Here the plist
+# goes into /System/Library/LaunchDaemons at packaging time, as a package
+# file, so pkg upgrades it and pkg delete removes it with nothing deleted by
+# a script. The post-install script then enables both jobs in the overrides
+# database (/var/db/launchd.db/com.apple.launchd/overrides.plist) on a first
+# install only, not on upgrades, so an admin who turned the graphical login
+# off (`launchctl unload -w` on both plists, which disable-loginwindow.sh
+# does) keeps it off. The pre-deinstall script takes the two entries out
+# again when the package is really removed. Neither script runs launchctl:
+# starting the WindowServer would take the console from the terminal pkg
+# runs in, so the change takes effect at the next boot (`pkg install
+# NextBSD-desktop` and a reboot). Both are Lua, which pkg runs in-process
+# against the install root, so they work under `pkg -r` for an image too.
 if [ -f "art/nextbsd-desktop-${ARCH}.tar.gz" ]; then
-  repkg -a nextbsd-desktop NextBSD-desktop-apps desktop "NextBSD desktop apps" \
-    NextBSD-freebsd-compat NextBSD-userland NextBSD-gnustep
+  mkdir -p stage/desktop
+  # Everything but /etc ...
+  tar -C stage/desktop --exclude ./etc --exclude './etc/*' -xzf "art/nextbsd-desktop-${ARCH}.tar.gz"
+  [ ! -e stage/desktop/etc ] || { echo "ERROR: /etc from nextbsd-desktop was not left out of the package" >&2; exit 1; }
+  LWRES=stage/desktop/System/Library/CoreServices/loginwindow.app/Resources
+  for f in "$LWRES/org.nextbsd.loginwindow.plist" \
+           stage/desktop/System/Library/LaunchDaemons/org.nextbsd.WindowServer.plist \
+           stage/desktop/System/Library/Preferences/org.nextbsd.WindowServer.plist; do
+    [ -f "$f" ] || { echo "ERROR: nextbsd-desktop's artifact has no ${f#stage/desktop}" >&2; exit 1; }
+  done
+  cp "$LWRES/org.nextbsd.loginwindow.plist" stage/desktop/System/Library/LaunchDaemons/org.nextbsd.loginwindow.plist
+  chown 0:0 stage/desktop/System/Library/LaunchDaemons/org.nextbsd.loginwindow.plist
+  chmod 0644 stage/desktop/System/Library/LaunchDaemons/org.nextbsd.loginwindow.plist
+  # loginwindow's PAM service, for the post-install script: nextbsd-overlays'
+  # copy, else the artifact's own (builds before nextbsd-desktop#2).
+  PAMTEXT=tool/pam.d-loginwindow
+  if [ -s art/overlays-pam.d-loginwindow ]; then
+    cp art/overlays-pam.d-loginwindow "$PAMTEXT"
+    echo "=== /etc/pam.d/loginwindow text: nextbsd-overlays ==="
+  elif tar -xzOf "art/nextbsd-desktop-${ARCH}.tar.gz" ./etc/pam.d/loginwindow > "$PAMTEXT" 2>/dev/null && [ -s "$PAMTEXT" ]; then
+    echo "=== /etc/pam.d/loginwindow text: nextbsd-desktop's artifact (nextbsd-overlays has none yet) ==="
+  else
+    echo "ERROR: no /etc/pam.d/loginwindow text, neither from nextbsd-overlays nor from nextbsd-desktop's artifact" >&2
+    exit 1
+  fi
+  ! grep -q ']==]' "$PAMTEXT" || { echo "ERROR: /etc/pam.d/loginwindow contains ]==], which ends the Lua string" >&2; exit 1; }
+
+  DESKTOPAPPSMETA=$(mktemp -d /tmp/desktop-apps-meta.XXXXXX)
+  {
+    echo '-- NextBSD-desktop-apps post-install (nextbsd/nextbsd#676).'
+    printf 'local PAM_TEXT = [==[\n'
+    cat "$PAMTEXT"
+    printf ']==]\n'
+  } > "$DESKTOPAPPSMETA/pkg-post-install.lua"
+  cat >> "$DESKTOPAPPSMETA/pkg-post-install.lua" <<'LUA'
+local function exists(p) return pkg.stat(p) ~= nil end
+local function mkdirp(d)
+  if not exists(d) then
+    pkg.exec({"/bin/mkdir", "-p", pkg_rootdir .. d})
+  end
+end
+
+-- 1. loginwindow's PAM service, only where there is none (/etc is the
+--    admin's; nextbsd-pkg#25). PAM_TEXT is nextbsd-overlays'
+--    rootfs/private/etc/pam.d/loginwindow, embedded when the package was
+--    built.
+local pam = "/etc/pam.d/loginwindow"
+if not exists(pam) then
+  mkdirp("/etc/pam.d")
+  local out = io.open(pam, "w")
+  if out ~= nil then
+    out:write(PAM_TEXT)
+    out:close()
+    pkg.print_msg("NextBSD-desktop-apps: installed " .. pam)
+  else
+    pkg.print_msg("NextBSD-desktop-apps: could not write " .. pam .. "; the graphical login cannot authenticate without it")
+  end
+end
+
+-- 2. Boot into the graphical login: enable org.nextbsd.WindowServer and
+--    org.nextbsd.loginwindow in launchd's overrides database, as
+--    `launchctl load -w` does. First install only: an upgrade keeps what
+--    the admin chose.
+if pkg_upgrade then
+  return
+end
+local dir = "/var/db/launchd.db/com.apple.launchd"
+local ovr = dir .. "/overrides.plist"
+local s = nil
+local f = io.open(ovr, "r")
+if f ~= nil then
+  s = f:read("*a")
+  f:close()
+end
+if s == nil or not s:find("<dict", 1, true) then
+  s = '<?xml version="1.0" encoding="UTF-8"?>\n' ..
+      '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n' ..
+      '<plist version="1.0">\n<dict>\n</dict>\n</plist>\n'
+end
+if s:sub(1, 6) == "bplist" then
+  pkg.print_msg("NextBSD-desktop-apps: " .. ovr .. " is a binary property list; enable the desktop with " ..
+                "launchctl load -w /System/Library/LaunchDaemons/org.nextbsd.WindowServer.plist " ..
+                "/System/Library/LaunchDaemons/org.nextbsd.loginwindow.plist")
+  return
+end
+s = s:gsub("<dict/>", "<dict>\n</dict>", 1)
+local function enable(s, label)
+  local k = "<key>" .. label .. "</key>"
+  local _, j = s:find(k, 1, true)
+  if j ~= nil then
+    local ds, de = s:find("<dict>.-</dict>", j + 1)
+    if ds ~= nil then
+      local d = s:sub(ds, de)
+      local nd, n = d:gsub("(<key>Disabled</key>%s*)<%a+/>", "%1<false/>")
+      if n == 0 then
+        nd = d:sub(1, -8) .. "\t<key>Disabled</key>\n\t\t<false/>\n\t</dict>"
+      end
+      return s:sub(1, ds - 1) .. nd .. s:sub(de + 1)
+    end
+  end
+  -- A new entry before the end of the top-level dict (its last </dict>).
+  local last, p = nil, 1
+  while true do
+    local a = s:find("</dict>", p, true)
+    if a == nil then break end
+    last, p = a, a + 1
+  end
+  return s:sub(1, last - 1) .. "\t" .. k .. "\n\t<dict>\n\t\t<key>Disabled</key>\n\t\t<false/>\n\t</dict>\n" .. s:sub(last)
+end
+s = enable(s, "org.nextbsd.WindowServer")
+s = enable(s, "org.nextbsd.loginwindow")
+mkdirp(dir)
+local out = io.open(ovr .. ".new", "w")
+if out == nil then
+  pkg.print_msg("NextBSD-desktop-apps: cannot write " .. ovr .. "; the graphical login is not enabled")
+  return
+end
+out:write(s)
+out:close()
+os.rename(ovr .. ".new", ovr)
+pkg.print_msg("NextBSD-desktop-apps: the graphical login starts at the next boot")
+LUA
+  cat > "$DESKTOPAPPSMETA/pkg-pre-deinstall.lua" <<'LUA'
+-- NextBSD-desktop-apps pre-deinstall (nextbsd/nextbsd#676): take
+-- org.nextbsd.WindowServer and org.nextbsd.loginwindow out of launchd's
+-- overrides database again. Not on an upgrade. Their plists go with the
+-- package, so getty has ttyv0 back at the next boot. /etc/pam.d/loginwindow
+-- stays: it is the admin's.
+if pkg_upgrade then
+  return
+end
+local ovr = "/var/db/launchd.db/com.apple.launchd/overrides.plist"
+local f = io.open(ovr, "r")
+if f == nil then
+  return
+end
+local s = f:read("*a")
+f:close()
+if s:sub(1, 6) == "bplist" then
+  return
+end
+local function drop(s, label)
+  local i, j = s:find("<key>" .. label .. "</key>", 1, true)
+  if i == nil then return s end
+  local ds, de = s:find("<dict>.-</dict>", j + 1)
+  if ds == nil then return s end
+  while i > 1 and s:sub(i - 1, i - 1):match("[ \t]") do i = i - 1 end
+  if s:sub(de + 1, de + 1) == "\n" then de = de + 1 end
+  return s:sub(1, i - 1) .. s:sub(de + 1)
+end
+local n = drop(drop(s, "org.nextbsd.WindowServer"), "org.nextbsd.loginwindow")
+if n ~= s then
+  local out = io.open(ovr .. ".new", "w")
+  if out ~= nil then
+    out:write(n)
+    out:close()
+    os.rename(ovr .. ".new", ovr)
+  end
+end
+pkg.print_msg("NextBSD-desktop-apps: the text console comes back at the next boot")
+LUA
+  _mconfig=/System/Library/Preferences/org.nextbsd.WindowServer.plist
+  _mscripts=$DESKTOPAPPSMETA
+  mkpkg NextBSD-desktop-apps stage/desktop "NextBSD desktop apps" \
+    "$(deps NextBSD-freebsd-compat NextBSD-userland NextBSD-displayserver-support NextBSD-xlibs \
+            NextBSD-mesa NextBSD-mesa-x11 NextBSD-xlibre NextBSD-gnustep-support NextBSD-printing-support \
+            NextBSD-gnustep)"
+  _mconfig= _mscripts=
   DESKTOPMETA=$(mktemp -d /tmp/desktop-meta.XXXXXX)
   deps NextBSD-server NextBSD-gnustep NextBSD-desktop-apps | metapkg NextBSD-desktop "NextBSD desktop" \
     "Installs the NextBSD ${ARCH} desktop, snapshot ${VER}: NextBSD-server, GNUstep and the desktop apps." \

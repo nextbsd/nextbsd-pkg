@@ -136,7 +136,7 @@ pkg upgrade                    # rolling: picks up each new snapshot
 | `NextBSD-printing-support` | ✓ | ✓ | nextbsd-printing-support (Apple's CUPS; GnuTLS from gnustep-support) | compat, userland, gnustep-support | — |
 | `NextBSD-toolchain` | ✓ | ✓ | nextbsd-toolchain (on-machine clang/lld 19.1.7, gmake, pkgconf, Apple's Git, CMake, GNU m4/autoconf/automake/libtool and their private Perl) | compat, userland | — |
 | `NextBSD-gnustep` | ✓ | ✓ | nextbsd-gnustep's build, `nextbsd-gnustep-<arch>` (the GNUstep core from NextBSD's forks: tools-make, libobjc2, libs-base, libs-corebase, libs-gui, libs-back, libs-av; all in `/System/Library`: Libraries, Headers, Frameworks, Makefiles, Tools, Bundles, `Preferences/GNUstep.conf`). Not its SDK artifact | compat, userland, displayserver-support, xlibs, gnustep-support, printing-support, mesa-x11 | — |
-| `NextBSD-desktop-apps` | ✓ | ✓ | nextbsd-desktop's build, `nextbsd-desktop-<arch>` (WindowServer, loginwindow, Workspace, the Dock in `/System/Library/CoreServices`; Terminal, the settings apps, Software, Update, Installer in `/System/Applications`; InnerSpace, the theme). **Built only once nextbsd-desktop publishes** | compat, userland, gnustep | — |
+| `NextBSD-desktop-apps` | ✓ | ✓ | nextbsd-desktop's build, `nextbsd-desktop-<arch>` (WindowServer, loginwindow, Workspace, the Dock in `/System/Library/CoreServices`; Terminal, the settings apps, Software, Update, Installer, XLibre in `/System/Applications`; InnerSpace, the theme, the GNUstep `GlobalDefaults`; libWindowServerClient and the WindowServer tools in `/usr`), minus its `/etc`; plus loginwindow's LaunchDaemon in `/System/Library/LaunchDaemons`. Post-install: `/etc/pam.d/loginwindow` if missing, and the graphical login enabled at boot ([below](#the-desktop-package)). **Built only once nextbsd-desktop publishes** | compat, userland, displayserver-support, xlibs, mesa, mesa-x11, xlibre, gnustep-support, printing-support, gnustep | — |
 | `pkg` | ✓ | ✓ | nextbsd-contrib's pkg artifact (NextBSD's pkg(8) 2.8.4; version from its `pkg.pc`) | compat | ✓ |
 | `NextBSD-server` (meta) | ✓ | ✓ | `SystemVersion.plist`, written by `build.sh`; the os-release post-install script | base, bootloader, kernel, userland, contrib, kernel-extensions-graphics, kernel-extensions (and -nvidia on amd64) and pkg | |
 | `NextBSD-everything` (transitional) | ✓ | ✓ | nothing: an empty package, not vital ([below](#nextbsd-everything-becomes-nextbsd-server)) | server | |
@@ -305,6 +305,36 @@ system alone. pkg records `NextBSD-server` as automatic on an upgraded machine, 
 everything under it are vital, so `pkg autoremove` leaves them. Once machines
 have moved, `NextBSD-everything` is dropped from `build.sh`; `pkg set -A 0 NextBSD-server`
 then clears the automatic flag on a machine that came through it.
+
+### The desktop package
+
+[nextbsd#676](https://github.com/nextbsd/nextbsd/issues/676). `NextBSD-desktop-apps` repackages
+nextbsd-desktop's build, with three additions so that `pkg install NextBSD-desktop` and a
+reboot come up in the graphical login:
+
+- **Dependencies** are the build's ELF `NEEDED` entries, including `NextBSD-xlibre` for
+  `libepoxy.so.0` (XLibre.app's Xnextbsd), which no other package provides.
+- **`/etc/pam.d/loginwindow`.** `/etc` belongs to nextbsd-overlays, so no package owns the
+  file. Its one source is nextbsd-overlays' `rootfs/private/etc/pam.d/loginwindow`, which new
+  images get; the workflow downloads it and `build.sh` embeds its text in the package's Lua
+  post-install script, which writes the file only where it is missing (seed.sh's rule). An
+  existing file is never replaced, and `pkg delete` leaves it.
+- **Booting into the desktop**, as pkgdemon/nextbsd-gnustep's `enable-loginwindow.sh` does it.
+  loginwindow's LaunchDaemon plist ships inside loginwindow.app; `build.sh` also puts it into
+  `/System/Library/LaunchDaemons` as a package file (its presence is what makes getty leave
+  ttyv0 to the graphical login, and pkg removes it on `pkg delete`). WindowServer's
+  LaunchDaemon ships `Disabled`. On a first install (not an upgrade) the post-install script
+  enables `org.nextbsd.WindowServer` and `org.nextbsd.loginwindow` in launchd's overrides
+  database, `/var/db/launchd.db/com.apple.launchd/overrides.plist`, which is what
+  `launchctl load -w` records; the pre-deinstall script takes the entries out again on a real
+  removal. Neither runs launchctl (starting the WindowServer would take the console from the
+  terminal pkg runs in), so the change takes effect at the next boot. An admin who turns the
+  graphical login off (`launchctl unload -w` on both plists, as `disable-loginwindow.sh` does)
+  keeps it off across upgrades.
+- **Configuration:** `/System/Library/Preferences/org.nextbsd.WindowServer.plist` (the
+  WindowServer's system-wide settings) is an `@config` file, so an upgrade keeps an admin's
+  change. The GNUstep defaults in `/System/Library/Preferences/GlobalDefaults` (`GSTheme`
+  NextBSD, ...) are plain files: libs-base reads them below each user's own defaults.
 
 ### Upgrades and moved files
 
