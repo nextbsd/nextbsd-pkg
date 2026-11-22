@@ -1,7 +1,8 @@
 #!/bin/sh
 # verify.sh — runs INSIDE a fresh FreeBSD VM. Points NextBSD's pkg at the
 # just-published flat repo (continuous-${ARCH} Release assets) and confirms the
-# package set is queryable and that NextBSD-everything resolves the full
+# package set is queryable and that NextBSD-server (and the transitional
+# NextBSD-everything, and NextBSD-desktop once it is built) resolves the full
 # dependency graph.
 #
 # The packages carry the NextBSD ABI (NextBSD:27:<arch>), which only NextBSD's
@@ -45,7 +46,19 @@ $PKG update -f
 echo "=== every NextBSD package in the ${ARCH} catalog ==="
 $PKG search -r NextBSD NextBSD
 
-echo "=== dry-run install of the whole OS (NextBSD-everything resolves the graph) ==="
+echo "=== dry-run install of the whole OS (NextBSD-server resolves the graph) ==="
+$PKG install -n -y NextBSD-server
+
+echo "=== dry-run install of the transitional NextBSD-everything (nextbsd/nextbsd#680) ==="
 $PKG install -n -y NextBSD-everything
 
-echo "OK: ${ARCH} flat pkg repo readable; NextBSD-everything resolves the dependency graph"
+metas="NextBSD-server NextBSD-everything"
+if [ -n "$($PKG rquery -r NextBSD '%n' NextBSD-desktop 2>/dev/null || true)" ]; then
+  echo "=== dry-run install of the desktop (NextBSD-desktop resolves the graph) ==="
+  $PKG install -n -y NextBSD-desktop
+  metas="$metas NextBSD-desktop"
+else
+  echo "=== no NextBSD-desktop in the ${ARCH} catalog yet ==="
+fi
+
+echo "OK: ${ARCH} flat pkg repo readable; ${metas} resolve the dependency graph"

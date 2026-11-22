@@ -20,13 +20,15 @@ nextbsd-mesa (+ mesa-x11) ─┤
 nextbsd-xlibre ────────────┤
 nextbsd-gnustep-support ───┤
 nextbsd-printing-support ──┤
-nextbsd-toolchain ─────────┘
+nextbsd-toolchain ─────────┤
+nextbsd-gnustep ───────────┤  (the GNUstep core)
+nextbsd-desktop ───────────┘  (the desktop; optional until it publishes)
                │  repository_dispatch: userland-updated / contrib-updated
                ▼
            nextbsd-pkg  ──(pkg create / pkg repo, inside a FreeBSD VM)──▶  flat repo (NextBSD:27:<arch>)
                │
                ▼  GitHub Release assets:  continuous-amd64 / continuous-arm64
-           users:  pkg update && pkg upgrade     ISO builder:  pkg install NextBSD-everything
+           users:  pkg update && pkg upgrade     ISO builder:  pkg install NextBSD-server (or NextBSD-desktop)
 ```
 
 - **Packaging runs in a VM** (vmactions); the Linux runner only downloads the
@@ -42,11 +44,15 @@ nextbsd-toolchain ─────────┘
   `OSVERSION` to `pkg create`, which stamps both; only NextBSD's pkg knows this ABI
   (nextbsd-contrib `src/pkg`, patch 0005), and on NextBSD 27 it computes the same
   ABI by itself.
-- **Install test.** `install-test.sh` installs `NextBSD-everything` into a scratch root
+- **Install test.** `install-test.sh` installs `NextBSD-server` into a scratch root
   from a repo named `NextBSD`, then, in a second root, checks
   that `pkg install NextBSD-mesa` brings neither `NextBSD-xlibs`, `NextBSD-mesa-x11` nor
-  `NextBSD-xlibre`, and that `pkg install NextBSD-xlibre` brings `NextBSD-mesa`,
-  `NextBSD-mesa-x11` and `NextBSD-xlibs`.
+  `NextBSD-xlibre`, that `pkg install NextBSD-xlibre` brings `NextBSD-mesa`,
+  `NextBSD-mesa-x11` and `NextBSD-xlibs`, and that `NextBSD-gnustep` installs on top.
+  In a third root the transitional `NextBSD-everything` must install `NextBSD-server`
+  (and `NextBSD-desktop`, when it was built, the desktop); in a fourth, `NextBSD-everything`
+  from the published repo must `pkg upgrade` to this run's packages without losing any
+  (see [NextBSD-everything becomes NextBSD-server](#nextbsd-everything-becomes-nextbsd-server)).
 - **Version `27.0.0.<build>`** on every NextBSD package
   ([nextbsd#536](https://github.com/nextbsd/nextbsd/issues/536)): `27.0.0` is the
   kernel's `KERNEL-VERSION` asset (`kern.osrelease`, so it matches `uname -r`), and
@@ -56,13 +62,13 @@ nextbsd-toolchain ─────────┘
   `0.0.0.<timestamp>` versions published before it, and `pkg upgrade` moves to it.
   Rerunning a publish run keeps its `run_number`, so it republishes the same version
   and installed systems don't upgrade to it; start a new run instead.
-- **`SystemVersion.plist`.** `NextBSD-everything` owns
+- **`SystemVersion.plist`.** `NextBSD-server` owns
   `/System/Library/CoreServices/SystemVersion.plist`, with Darwin's keys:
   `ProductName` `NextBSD`, `ProductVersion` and `ProductUserVisibleVersion`
   `27.0.0`, `ProductBuildVersion` `<build>`, and NextBSD's `NBSDBuildDate`.
   `sw_vers(1)`, `nextbsd-version` and the login banner read it, so they show the
-  version `pkg info NextBSD-everything` does. A Lua post-install script in
-  `NextBSD-everything` rewrites `/etc/os-release` (`NAME`, `VERSION`, `VERSION_ID`,
+  version `pkg info NextBSD-server` does. A Lua post-install script in
+  `NextBSD-server` rewrites `/etc/os-release` (`NAME`, `VERSION`, `VERSION_ID`,
   `BUILD_ID`, `PRETTY_NAME`) from the plist on every install and upgrade.
 - **Publishing is manual** (`workflow_dispatch`). Pull requests build and install-test
   but never publish.
@@ -99,17 +105,18 @@ NextBSD: { url: "https://github.com/nextbsd/nextbsd-pkg/releases/download/contin
 NextBSD: { url: "https://github.com/nextbsd/nextbsd-pkg/releases/download/continuous-arm64", enabled: yes }
 ```
 
-Then install the whole OS via the meta-package (and upgrade as CI republishes):
+Then install the whole OS via a meta-package (and upgrade as CI republishes):
 
 ```sh
 pkg update
-pkg install NextBSD-everything      # base + bootloader + kernel + userland + contrib + kernel-extensions (+ -graphics, + NVIDIA on amd64) + pkg
+pkg install NextBSD-server     # base + bootloader + kernel + userland + contrib + kernel-extensions (+ -graphics, + NVIDIA on amd64) + pkg
+pkg install NextBSD-desktop    # or: NextBSD-server + GNUstep + the desktop
 pkg upgrade                    # rolling: picks up each new snapshot
 ```
 
 ## Packages
 
-| package | amd64 | arm64 | from | depends on | in `NextBSD-everything` |
+| package | amd64 | arm64 | from | depends on | in `NextBSD-server` |
 |---|:--:|:--:|---|---|:--:|
 | `NextBSD-freebsd-compat` | ✓ | ✓ | nextbsd-freebsd-compat (base: libc, PAM, commands) | — | ✓ |
 | `NextBSD-bootloader` | ✓ | ✓ | nextbsd-freebsd-compat's base artifact, its `/boot` (loader, `loader.efi`, Lua, `defaults/loader.conf`, images, fonts; boot blocks on amd64) | — | ✓ |
@@ -128,20 +135,26 @@ pkg upgrade                    # rolling: picks up each new snapshot
 | `NextBSD-gnustep-support` | ✓ | ✓ | nextbsd-gnustep-support (what GNUstep needs: image formats, GnuTLS, cairo in /usr/X11, sound, SQLite, flite, FFmpeg) | compat, displayserver-support, xlibs | — |
 | `NextBSD-printing-support` | ✓ | ✓ | nextbsd-printing-support (Apple's CUPS; GnuTLS from gnustep-support) | compat, userland, gnustep-support | — |
 | `NextBSD-toolchain` | ✓ | ✓ | nextbsd-toolchain (on-machine clang/lld 19.1.7, gmake, pkgconf, Apple's Git, CMake, GNU m4/autoconf/automake/libtool and their private Perl) | compat, userland | — |
+| `NextBSD-gnustep` | ✓ | ✓ | nextbsd-gnustep's build, `nextbsd-gnustep-<arch>` (the GNUstep core from NextBSD's forks: tools-make, libobjc2, libs-base, libs-corebase, libs-gui, libs-back, libs-av; all in `/System/Library`: Libraries, Headers, Frameworks, Makefiles, Tools, Bundles, `Preferences/GNUstep.conf`). Not its SDK artifact | compat, userland, displayserver-support, xlibs, gnustep-support, printing-support, mesa-x11 | — |
+| `NextBSD-desktop-apps` | ✓ | ✓ | nextbsd-desktop's build, `nextbsd-desktop-<arch>` (WindowServer, loginwindow, Workspace, the Dock in `/System/Library/CoreServices`; Terminal, the settings apps, Software, Update, Installer in `/System/Applications`; InnerSpace, the theme). **Built only once nextbsd-desktop publishes** | compat, userland, gnustep | — |
 | `pkg` | ✓ | ✓ | nextbsd-contrib's pkg artifact (NextBSD's pkg(8) 2.8.4; version from its `pkg.pc`) | compat | ✓ |
-| `NextBSD-everything` (meta) | ✓ | ✓ | `SystemVersion.plist`, written by `build.sh` | base, bootloader, kernel, userland, contrib, kernel-extensions-graphics, kernel-extensions (and -nvidia on amd64) and pkg | |
+| `NextBSD-server` (meta) | ✓ | ✓ | `SystemVersion.plist`, written by `build.sh`; the os-release post-install script | base, bootloader, kernel, userland, contrib, kernel-extensions-graphics, kernel-extensions (and -nvidia on amd64) and pkg | |
+| `NextBSD-everything` (transitional) | ✓ | ✓ | nothing: an empty package, not vital ([below](#nextbsd-everything-becomes-nextbsd-server)) | server | |
+| `NextBSD-desktop` (meta) | ✓ | ✓ | nothing. **Built only once nextbsd-desktop publishes** | server, gnustep, desktop-apps | |
 
 Each package repackages one of its repo's `continuous` artifacts as is (nextbsd-mesa
 publishes two: `NextBSD-mesa` and `NextBSD-mesa-x11`), and every package of
 one run shares one snapshot version. The dependencies are the artifacts' ELF `NEEDED`
 entries matched to the files the other artifacts ship.
 
-**Optional base packages.** `NextBSD-everything` is the core OS only: base, bootloader, kernel,
+**Optional base packages.** `NextBSD-server` is the core OS only: base, bootloader, kernel,
 userland, contrib, the kernel extensions and pkg. Everything else NextBSD publishes is an
 **optional base package**: built and stamped like the core set, installed into `/usr`
 or `/usr/X11` (never `/usr/local`), but only installed when a user or an image asks for
-it by name. No meta-package pulls them in (maintainer decision,
-[nextbsd#571](https://github.com/nextbsd/nextbsd/issues/571)).
+it by name, or through `NextBSD-desktop`, which brings `NextBSD-gnustep`, the desktop and
+what they link (maintainer decision,
+[nextbsd#571](https://github.com/nextbsd/nextbsd/issues/571); E47,
+[nextbsd#671](https://github.com/nextbsd/nextbsd/issues/671)).
 
 | optional package | installs | pulls in |
 |---|---|---|
@@ -153,6 +166,7 @@ it by name. No meta-package pulls them in (maintainer decision,
 | `NextBSD-gnustep-support` | libraries GNUstep needs | displayserver-support, xlibs |
 | `NextBSD-printing-support` | Apple's CUPS | gnustep-support |
 | `NextBSD-toolchain` | the on-machine compiler and build tools | — |
+| `NextBSD-gnustep` | the GNUstep core, in `/System/Library` | gnustep-support, printing-support, mesa-x11 (and what they need) |
 
 **Kernel and kexts must match.** Kexts are tied to the kernel ABI version (`27.0`), not to one
 exact kernel build (nextbsd-kernel#376). The kernel artifact's `KERNEL-BUILD-ID` holds that ABI
@@ -164,7 +178,7 @@ current kernel (nextbsd-kernel-extensions and nextbsd-kernel-extensions-graphics
 
 The NVIDIA userland bundle in `NextBSD-kernel-extensions-nvidia` links libX11, libXext, libdrm
 and libgbm. Its package lists them as `shlibs_required_ignore`, so pkg doesn't pull X or
-Mesa into `NextBSD-everything` through them. The bundle's links go into `/usr/X11`
+Mesa into `NextBSD-server` through them. The bundle's links go into `/usr/X11`
 (`/usr/share/egl/egl_external_platform.d` for NVIDIA's EGL platform files) and ship in the
 package, so they work whenever `NextBSD-mesa` or `NextBSD-xlibre` is installed later.
 nextbsd-gershwin-support is deliberately **not** packaged (maintainer, 2026-10-25), and
@@ -243,7 +257,8 @@ FreeBSD's names (such as an empty `libX11`) to redirect those dependencies.
 
 ### Vital packages and the NextBSD stamp
 
-Every `NextBSD-*` package, `NextBSD-everything` and `pkg` included, has two marks in its manifest:
+Every `NextBSD-*` package, `NextBSD-server`, `NextBSD-desktop` and `pkg` included, has two marks
+in its manifest (the transitional `NextBSD-everything` has only the stamp; it is not vital):
 
 - **`vital: true`.** pkg refuses to delete a vital package: `pkg delete` without `-f`,
   `pkg autoremove`, and removing it to resolve a conflict with another repo's package all
@@ -261,6 +276,36 @@ upgrade. After that the package can be deleted or autoremoved, and only then is 
 dropped from the repo. On one machine, `pkg set -v 0 <name>` clears the flag by hand.
 `pkg delete -f` overrides it, but leaves whatever depended on the package broken.
 
+### NextBSD-everything becomes NextBSD-server
+
+[nextbsd#680](https://github.com/nextbsd/nextbsd/issues/680). `NextBSD-server` is what
+`NextBSD-everything` was: the same dependencies, `SystemVersion.plist` and the os-release
+post-install script. The Server Preview images install it; the Desktop Preview images
+install `NextBSD-desktop`, which requires it.
+
+Machines installed before have `NextBSD-everything`. For a transition period it stays in
+the repo as an **empty package** (comment "NextBSD (transitional)") that depends only on
+`NextBSD-server` at the same snapshot version. On such a machine `pkg upgrade`:
+
+- upgrades `NextBSD-everything` to the empty version and installs `NextBSD-server` (as a
+  new dependency, so pkg marks it automatic) in one transaction, along with the usual
+  upgrades of everything else;
+- removes no package: everything the old `NextBSD-everything` depended on, `NextBSD-server`
+  depends on;
+- moves `SystemVersion.plist` from `NextBSD-everything` to `NextBSD-server`. pkg sees the
+  new `NextBSD-server` conflict with the installed `NextBSD-everything` on that file and
+  splits the upgrade: it deinstalls the old `NextBSD-everything` first (which owns nothing
+  else), installs `NextBSD-server`, whose post-install script rewrites `/etc/os-release`,
+  and installs the empty `NextBSD-everything` last. So the old package's cleanup never
+  deletes the new copy.
+
+`install-test.sh` checks this on every run, upgrading from the published repo.
+`NextBSD-everything` is not vital, so `pkg delete NextBSD-everything` works and leaves the
+system alone. pkg records `NextBSD-server` as automatic on an upgraded machine, but it and
+everything under it are vital, so `pkg autoremove` leaves them. Once machines
+have moved, `NextBSD-everything` is dropped from `build.sh`; `pkg set -A 0 NextBSD-server`
+then clears the automatic flag on a machine that came through it.
+
 ### Upgrades and moved files
 
 pkg owns each package's file list. `pkg upgrade` deletes every file the old version of a
@@ -277,7 +322,7 @@ old artifact by hand has unowned `/usr/X11` copies that pkg never removes: delet
 
 ## Status
 
-**Working** (unsigned). `pkg install NextBSD-everything` resolves the full set from the
+**Working** (unsigned). `pkg install NextBSD-server` resolves the full set from the
 flat repo on both arches. Package signing and the pkg-in-VM ISO assembler refactor
 are the remaining pre-production steps; the full design (further splits, dep pins,
 versioning) is in [`docs/PLAN.json`](docs/PLAN.json).
