@@ -244,6 +244,19 @@ mkdir -p /tmp/kx
 tar -C /tmp/kx -xzf "art/nextbsd-kernel-${ARCH}.tar.gz" "$KPATH"
 cp "/tmp/kx/$KPATH" stage/kernel/boot/kernel/kernel
 chmod 555 stage/kernel/boot/kernel/kernel
+# arm64 also carries the Raspberry Pi 5 family kernel (NEXTBSD-RPI5, from the
+# same nextbsd-kernel run), as the ELF loader.efi boots on a Pi through U-Boot:
+# loader.conf.d/rpi5.conf there says kernel="kernel.RPI5" (#53,
+# nextbsd/nextbsd#687). Packaged here so pkg upgrade updates the kernel a Pi
+# boots; other arm64 machines carry the file and never load it.
+if [ "$ARCH" = arm64 ]; then
+  [ -s art/rpi5-kernel-arm64.elf ] || { echo "ERROR: no art/rpi5-kernel-arm64.elf (nextbsd-kernel's continuous asset)" >&2; exit 1; }
+  [ "$(od -An -tx1 -N4 art/rpi5-kernel-arm64.elf | tr -d ' \n')" = 7f454c46 ] \
+    || { echo "ERROR: art/rpi5-kernel-arm64.elf is not an ELF" >&2; exit 1; }
+  mkdir -p stage/kernel/boot/kernel.RPI5
+  cp art/rpi5-kernel-arm64.elf stage/kernel/boot/kernel.RPI5/kernel
+  chmod 555 stage/kernel/boot/kernel.RPI5/kernel
+fi
 mkpkg NextBSD-kernel stage/kernel "NextBSD kernel" ""
 
 # The kernel's KERNEL-BUILD-ID: its kext ABI version, e.g. 27.0 (nextbsd-kernel#376; it was <commit>.<run_id>.<run_attempt> under #326),

@@ -69,6 +69,12 @@ jobs:
           # (nextbsd/nextbsd#536).
           gh release download continuous -R nextbsd/nextbsd-kernel \
             --pattern KERNEL-VERSION --dir art --clobber
+          # arm64: the Raspberry Pi 5 family kernel as an ELF, which loader.efi
+          # boots from /boot/kernel.RPI5/kernel (#53, nextbsd/nextbsd#687).
+          if [ "$ARCH" = arm64 ]; then
+            gh release download continuous -R nextbsd/nextbsd-kernel \
+              --pattern rpi5-kernel-arm64.elf --dir art --clobber
+          fi
           gh release download continuous -R nextbsd/nextbsd-userland \
             --pattern "nextbsd-userland-${ARCH}.tar.gz" --dir art --clobber
           # The rest are one artifact per repo, nextbsd-<repo>-<arch>.tar.gz,
