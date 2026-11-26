@@ -106,14 +106,22 @@ jobs:
           gh release download continuous -R nextbsd/nextbsd-gnustep \
             --pattern "nextbsd-gnustep-${ARCH}.tar.gz" --dir art --clobber
           # The desktop (nextbsd/nextbsd#675), packaged as NextBSD-desktop-apps
-          # under the NextBSD-desktop meta-package (#676). Optional until
-          # nextbsd-desktop publishes: without it build.sh builds neither.
-          if gh release download continuous -R nextbsd/nextbsd-desktop \
-               --pattern "nextbsd-desktop-${ARCH}.tar.gz" --dir art --clobber; then
-            echo "nextbsd-desktop: packaging NextBSD-desktop-apps and NextBSD-desktop"
-          else
-            echo "nextbsd-desktop has no nextbsd-desktop-${ARCH}.tar.gz on continuous yet; NextBSD-desktop is skipped"
-          fi
+          # under the NextBSD-desktop meta-package (#676). Required: a repo
+          # without it can't build a Desktop image. A desktop build publishing
+          # at the same moment replaces the tarball, so a miss is retried for
+          # a few minutes before the build fails.
+          for try in 1 2 3 4 5 6; do
+            if gh release download continuous -R nextbsd/nextbsd-desktop \
+                 --pattern "nextbsd-desktop-${ARCH}.tar.gz" --dir art --clobber; then
+              break
+            fi
+            if [ "$try" = 6 ]; then
+              echo "::error::nextbsd-desktop has no nextbsd-desktop-${ARCH}.tar.gz on continuous"
+              exit 1
+            fi
+            echo "nextbsd-desktop-${ARCH}.tar.gz not there (try $try); retrying in 30 seconds"
+            sleep 30
+          done
           # loginwindow's PAM service (nextbsd/nextbsd#676): nextbsd-overlays'
           # copy is the one source. NextBSD-desktop-apps' post-install embeds
           # it and writes /etc/pam.d/loginwindow where it is missing. Until
